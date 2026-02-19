@@ -1,0 +1,122 @@
+# ### Variables
+# @baseUrl = http://127.0.0.1:8000/api/accounts
+# @email=aryantiwary2003@gmail.com
+# @password = StrongPass123!
+# @fullName = Aryan Tiwary
+
+# ############################################################
+# # 1. SIGNUP (Triggers OTP Email)
+# ############################################################
+POST {{baseUrl}}/signup/
+Content-Type: application/json
+
+{
+    "email": "associate2@insight.com",
+    "password": "InSight2026!",
+    "full_name":  "Associate"
+}
+
+####
+
+# ############################################################
+# # 2. VERIFY OTP (Run this after checking your email)
+# # Replace "123456" with the actual code from your email
+# ############################################################
+POST {{baseUrl}}/verify-otp/
+Content-Type: application/json
+
+{
+    "email": "associate2@insight.com",
+    "otp": "129802"
+}
+
+# ###
+
+# ############################################################
+# # 3. LOGIN (Returns JWT Access & Refresh Tokens)
+# ############################################################
+# # @name login
+# POST {{baseUrl}}/login/
+# Content-Type: application/json
+
+# {
+#     "email": "{{email}}",
+#     "password": "SecurePassword123"
+# }
+
+# ###
+
+# ############################################################
+# # 4. LOGOUT (Requires Access Token in Header)
+# ############################################################
+# @refreshToken = {{login.response.body.refresh}}
+# @accessToken = {{login.response.body.access}}
+
+# POST {{baseUrl}}/logout/
+# Authorization: Bearer {{accessToken}}
+# Content-Type: application/json
+
+# {
+#     "refresh": "{{refreshToken}}"
+# }
+
+
+### Variables
+@baseUrl = http://127.0.0.1:8000/api/accounts
+@adminEmail = admin@insight.com
+@password = InSight2026!
+
+### 1. LOGIN AS ADMIN
+# This will give you the access token needed for other requests
+# @name login
+POST {{baseUrl}}/login/
+Content-Type: application/json
+
+{
+    "email": "{{adminEmail}}",
+    "password": "{{password}}"
+}
+
+### Capture the token from the response above
+@accessToken = {{login.response.body.access}}
+@refreshToken = {{login.response.body.refresh}}
+
+
+### 2. VIEW ALL USERS (Admin Only)
+# Uses the HasRBACPermission / IsAdminUserRole
+GET {{baseUrl}}/view-all/
+Authorization: Bearer {{accessToken}}
+
+
+### 3. VIEW UNASSIGNED PEOPLE
+# This shows everyone with role='user'
+GET {{baseUrl}}/unassigned/
+Authorization: Bearer {{accessToken}}
+
+
+### 4. ASSIGN A NEW ROLE
+# Replace "2" with an actual User ID from the View All list
+# Try changing a 'user' to a 'writer'
+POST {{baseUrl}}/assign-role/8/
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+    "role": "associate"
+}
+
+
+### 5. REFRESH TOKEN
+# Use this when your access token expires (after 30 mins)
+POST {{baseUrl}}/token/refresh/
+Content-Type: application/json
+
+{
+    "refresh": "{{refreshToken}}"
+}
+
+
+
+
+#id - 1,7,4 - writer
+#id - 5,2 - approver

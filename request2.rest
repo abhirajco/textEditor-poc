@@ -1,0 +1,203 @@
+### Variables
+@baseUrl = http://127.0.0.1:8000/api
+@writerToken = {{writer_login.response.body.access}}
+@approverToken = {{approver_login.response.body.access}}
+@adminToken = {{admin_login.response.body.access}}
+@associateToken = {{associate_login.response.body.access}}
+
+@writer2Token =  {{writer2_login.response.body.access}}
+
+@associate2Token = {{associate2_login.response.body.access}}
+# ==========================================
+# 1. AUTHENTICATION
+# ==========================================
+
+### Login as Writer
+# @name writer2_login
+POST {{baseUrl}}/accounts/login/
+Content-Type: application/json
+
+{
+    "email": "user@insight.com",
+    "password": "InSight2026!"
+}
+
+###
+
+# @name writer_login
+POST {{baseUrl}}/accounts/login/
+Content-Type: application/json
+
+{
+    "email": "writer@insight.com",
+    "password": "InSight2026!"
+}
+
+
+
+### Login as Approver
+# @name approver_login
+POST {{baseUrl}}/accounts/login/
+Content-Type: application/json
+
+{
+    "email": "approver@insight.com",
+    "password": "InSight2026!"
+}
+
+### Login as Admin
+# @name admin_login
+POST {{baseUrl}}/accounts/login/
+Content-Type: application/json
+
+{
+    "email": "admin@insight.com",
+    "password": "InSight2026!"
+}
+
+### Login as Associate
+# @name associate_login
+POST {{baseUrl}}/accounts/login/
+Content-Type: application/json
+
+{
+    "email": "associate@insight.com",
+    "password": "InSight2026!"
+}
+
+### Login as Associate
+# @name associate2_login
+POST {{baseUrl}}/accounts/login/
+Content-Type: application/json
+
+{
+    "email": "associate2@insight.com",
+    "password": "InSight2026!"
+}
+
+
+# ==========================================
+# 2. CONTENT CREATION & EDITING (WRITER)
+# ==========================================
+
+### CREATE: Writer starts a new story
+# Note: This creates Article ID 1 and Version 1. Flag is assigned to this user.
+POST {{baseUrl}}/content/articles/
+Authorization: Bearer {{writer2Token}}
+Content-Type: application/json
+
+{
+    "title": "draft4",
+    "content": "testing dtafts"
+}
+
+### LIST: View all drafts (Admins/Approvers see all, Writers see their own/flagged)
+GET {{baseUrl}}/content/articles/list/
+Authorization: Bearer {{approverToken}}
+
+Authorization: Bearer {{writerToken}}
+
+Authorization: Bearer {{adminToken}}
+# Authorization: Bearer {{writerToken}}
+# 
+
+### EDIT: Update content (Creates Version 2)
+# Only works if the user holds the 'flag_holder' status
+PUT {{baseUrl}}/content/articles/4/edit/
+Authorization: Bearer {{writer2Token}}
+Content-Type: application/json
+
+{
+    "content": "REVISION 1: Room temperature stability confirmed by three independent labs."
+}
+
+### TRANSFER: Pass the flag to another writer
+# Use the ID of another writer in your database
+POST {{baseUrl}}/content/articles/1/transfer/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+    "new_holder_id": 7
+}
+
+# ==========================================
+# 3. REVIEW & FEEDBACK (APPROVER)
+# ==========================================
+
+### FEEDBACK: Approver votes on the LATEST version
+POST {{baseUrl}}/content/articles/1/feedback/
+Authorization: Bearer {{approverToken}}
+Content-Type: application/json
+
+{
+    "vote": false,
+    "comment": "change this"
+}
+
+### HISTORY: Check audit trail (See all edits and their specific feedback)
+#visible by all , even all writers
+# GET {{baseUrl}}/content/articles/3/history/
+# Authorization: Bearer {{writer2Token}}
+
+# ==========================================
+# 4. FINAL DECISION (ADMIN ONLY)
+# ==========================================
+
+### REJECT: Admin sends it back for more work
+POST {{baseUrl}}/content/articles/2/admin-review/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "action": "reject"
+}
+
+### PUBLISH: Admin moves it to PublishedContent table
+POST {{baseUrl}}/content/articles/1/admin-review/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "action": "publish"
+}
+
+# ==========================================
+# 5. CONSUMPTION (ASSOCIATE/EVERYONE)
+# ==========================================
+
+### LIST PUBLISHED: Final articles only
+
+GET {{baseUrl}}/content/published/
+Authorization: Bearer {{associate2Token}}
+
+Authorization: Bearer {{approverToken}}
+
+Authorization: Bearer {{adminToken}}
+
+
+
+
+### flag view by admin and approver
+#working fine
+GET {{baseUrl}}/content/flag/view/
+Authorization: Bearer {{adminToken}}
+
+Authorization: Bearer {{approverToken}}
+
+
+
+
+
+
+
+### 1. View Dashboard (Check if you see your own/all drafts)
+#only for latest version, only for writers who has writen or hold draft, and approver not admin
+# GET {{baseUrl}}/content/drafts/dashboard/
+# Authorization: Bearer {{approverToken}}
+# Authorization: Bearer {{adminToken}}
+# 
+
+### 2. View History for Draft ID 1 (only writer thas has writen it,no one else and approver(not even admin )
+# GET {{baseUrl}}/content/drafts/1/history/
+# Authorization: Bearer {{adminToken}}

@@ -1,0 +1,130 @@
+#verify refresh token logic is working
+#see the asgi setting and uvicorn and gunicorn thing...
+
+#admin pswd - 123@#abc
+#uvicorn core.asgi:application --reload  -if you want to run on asgi server
+.\venv\Scripts\activate
+
+python manage.py makemigrations content
+python manage.py migrate
+
+
+
+
+#content publishing is not working
+#mailing system is not working
+#article list should on show the latsest version of te draft
+#done
+
+##view publishing is not working
+#   use version 3 of driver for postgres (psycopg2==2.9.11    )
+#   deadlock retry, (prevent or retry) , race condition , lock conflict  
+    atmoic transaction (using decorator) - try to keep transaction short , short lock  ,lock only the row which is used in transaction
+#   fingerprint
+#   correct path (check notifications path)
+#   remove access apis
+#   use redis now
+
+learn about asgi , and wsgi
+orm -only translation  of queery (django orm is- sync) , driver of postgres is async
+
+
+1.ask bhaiya about the rbac review
+2.cant we delete the otp?...eralier in the project it was in chache so it go deleted , but now no dleetion
+The "Clean" Way: Use a background task (like Celery) 
+or a simple management command to run EmailOTP.objects.filter(created_at__lt=one_hour_ago).delete() once a day.
+
+
+##
+1. pydantic --see this (use this)
+2. anything coming from the frontend , convert it to string first for safety features
+3. update feature branch , naming convention "faeature/ " and merge in develope branch
+4 . celery , azure blob storage
+5. indexing in db use db
+6. celery - use in 10 mins caching
+7. event driven for commenting using celery 
+8. cache the reviews(comments feedback) also
+9. django also have signals feature - to see this
+10.trackpoint and sharepoint in celery
+11.santize and validate input html can come , but prevent acttack (study everything)
+12. make cun bun board - assign task ,any one can see the task , any one can assign their task to asy one , add descrption of the task
+13.see how upvote downvote is working
+
+
+
+
+
+
+
+
+##how things are working
+
+To understand this system, you have to look at it as two separate 
+"gears" working together: the Identity Gear (who you are) 
+and the Permission Gear (what you can do).
+Here is the step-by-step breakdown from the database level 
+up to the API.
+
+1. The Core Tables & InterconnectionsWe have 3 main tables in
+ the accounts app that handle identity and access.
+ TablePurposeKey FieldsUserIdentity & Job Titleemail, full_name, role (Job Title)
+ RBACPermission Mapuser_id, area, role (Access Level)
+ EmailOTPSecurityemail, otp_codeHow they connect:The User table stores your main role (e.g., "Approver"). 
+ This is your "Job Title.
+ "The RBAC table is a Foreign Key to the User. 
+ One user can have multiple rows in the RBAC table.
+ Example: User "Sarah" has one RBAC row for area="content", role="feedback" and 
+ another for area="notifications", role="read".
+
+2. Defining "feedback" or "write" as a RoleYou asked: Where did we define that role=feedback gives 
+permission?We defined the available options in the RBAC model using choices, but the logic of 
+what "feedback" actually allows is defined in the Views.In apps/accounts/models.py
+:Pythonclass RBAC(models.Model):
+
+    AREA_CHOICES = (('content', 'Content'), ('hr', 'HR'))
+    # This is where the string 'feedback' is officially allowed in the DB
+    ROLE_CHOICES = (
+        ('read', 'Read'),
+        ('write', 'Write'),
+        ('feedback', 'Feedback'), 
+        ('admin', 'Admin'),
+    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    area = models.CharField(choices=AREA_CHOICES)
+    role = models.CharField(choices=ROLE_CHOICES)
+
+3. How we Authorize the Right PersonThe authorization happens 
+in a 3-step handshake whenever a request hits your API:
+
+Step A: The Gatekeeper (Permission Class)When you call the Feedback API, 
+the CanFeedback class runs first. It doesn't look at your job title; 
+it looks at the RBAC table.It sees the View wants area="content".
+It knows it is the CanFeedback class, so it wants role="feedback".
+It queries: RBAC.objects.filter(user=request.user, area="content", role="feedback").
+If a row exists, Sarah is "Authorized" to enter the view.
+
+Step B: The View DefinitionIn content/views.py, we "attach" that gatekeeper to the 
+specific URL:Pythonclass SubmitFeedbackView(APIView):
+    permission_classes = [CanFeedback] # This enforces the "feedback" role requirement
+    rbac_area = "content"
+
+Step C: The Business Logic (The specific check)For things 
+like Writing, we add one extra layer of security: The Flag.
+Even if the RBAC table says you are a "Writer," 
+the view checks: if draft.flag_holder == request.user.RBAC gets you in the room.
+The Flag gives you the pen.
+
+4. Summary of the FlowAdmin Action: The Admin uses the 
+Django Dashboard to give User "Sarah" a record in the RBAC 
+table with area="content" and role="feedback".
+User Action: Sarah sends a POST request 
+to /api/content/articles/1/feedback/.
+Permission Check: The system checks the RBAC table. 
+Sarah has the feedback role for the content area. 
+Access Granted.View Action: The SubmitFeedbackView runs 
+its code and saves her comment.Pros of this SetupGranular: 
+You can give someone "Feedback" rights without giving them 
+"Write" (Edit) rights.Dynamic: You can change a user'
+ permissions in the database instantly without changing code.
+ Scalable: If you add a "Payroll" app later, you just add
+ area="payroll" to the RBAC model and create a CanViewPayroll class.
