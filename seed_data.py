@@ -1,44 +1,77 @@
 import os
-import sys
 import django
 
-# 1. Setup paths to match your settings.py logic
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-APPS_DIR = os.path.join(BASE_DIR, 'apps')
-
-# This is the magic line that matches your settings.py
-if APPS_DIR not in sys.path:
-    sys.path.insert(0, APPS_DIR)
-
+# 1. Setup Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 django.setup()
 
-# 2. Import 'User' directly (NOT apps.accounts)
-from apps.accounts.models import User
+# 2. Import from the app names directly (relying on your sys.path in settings)
+from accounts.models import User, RBAC
 from django.contrib.auth.models import Group
 
-def seed():
-    print("--- Starting Data Injection ---")
-    roles = ['admin', 'writer', 'approver', 'associate', 'user']
-    
-    for role_name in roles:
-        email = f"{role_name}@insight.com"
+def seed_data():
+    print("🚀 Starting Seeding...")
+
+    # Define User Scenarios
+    users_to_create = [
+        {"email": "admin@insight.com", "name": "System Admin", "group": "admin", "role": "admin"},
+        {"email": "exec@insight.com", "name": "Executive Boss", "group": "executive", "role": "exec_approver"},
+        {"email": "writer@insight.com", "name": "Alice Writer", "group": "internal", "role": "writer"},
+        {"email": "reviewer@insight.com", "name": "Bob Reviewer", "group": "internal", "role": "reviewer"},
+        {"email": "sme@insight.com", "name": "Charlie Expert", "group": "external", "role": "sme"},
+    ]
+
+    for data in users_to_create:
         user, created = User.objects.get_or_create(
-            email=email,
+            email=data['email'],
             defaults={
-                'full_name': f"Test {role_name.capitalize()}",
-                'role': role_name,
-                'is_active': True,
-                'is_staff': True if role_name == 'admin' else False,
-                'is_superuser': True if role_name == 'admin' else False,
+                'full_name': data['name'],
+                'group': data['group'],
+                'role': data['role'],
+                'is_staff': True if data['group'] == 'admin' else False,
+                'is_superuser': True if data['group'] == 'admin' else False,
+                'is_active': True
             }
         )
-        user.set_password('InSight2026!')
-        user.save()
+        if created:
+            user.set_password("Pass123!")
+            user.save()
+            
+            # Sync Django Group
+            django_group, _ = Group.objects.get_or_create(name=data['group'].capitalize())
+            user.groups.add(django_group)
+            
+            # Seed RBAC for this specific group/role
+            seed_rbac_rules(django_group, data['group'], data['role'])
+            
+            print(f"✅ Created {data['email']} ({data['group']}/{data['role']})")
+        else:
+            print(f"🟡 {data['email']} already exists.")
 
-        group, _ = Group.objects.get_or_create(name=role_name.capitalize())
-        user.groups.add(group)
-        print(f"{'Created' if created else 'Updated'} {email}")
+def seed_rbac_rules(django_group, group, role):
+    """Matches the logic in your AssignRole view to ensure the matrix is populated."""
+    if group == 'admin':
+        for area in ["content", "users", "reports", "settings"]:
+            RBAC.objects.get_or_create(application_group=django_group, application_area=area, application_action="admin")
+    
+    elif group == 'executive':
+        RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="read")
+        RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="feedback")
+        RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="promote")
+
+    elif group == 'internal':
+        if role == 'writer':
+            RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="write")
+            RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="update")
+        elif role == 'reviewer':
+            RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="update")
+            RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="feedback")
+            RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="promote")
+
+    elif group == 'external' and role == 'sme':
+        RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="update")
+        RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="feedback")
 
 if __name__ == "__main__":
-    seed()
+    seed_data()
+    print("✨ Seeding Complete!")

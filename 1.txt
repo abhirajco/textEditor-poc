@@ -9,6 +9,8 @@ python manage.py makemigrations content
 python manage.py migrate
 
 
+python manage.py shell --for pyhton shell in terminal
+
 
 
 #content publishing is not working
@@ -52,7 +54,21 @@ or a simple management command to run EmailOTP.objects.filter(created_at__lt=one
 
 
 
+use queue for mailng (asynchronous)
+comment live fetching(web sockets use)
+if someone adds a name a mail will be gone to that person also
+if redis is empty and 10 call get, so one call be gone to redis and next will be coming from redis
+notifications also
 
+
+#change rbac , admin has all the permissions
+#for now only admins and exes can add comments
+
+
+#indexing in db nad redis
+#send emails to sme which are getting appointed
+#email system when content is begin edited, except who is editing it should go to all concerned person
+#lock should be relased once edited
 
 
 

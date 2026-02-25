@@ -1,19 +1,13 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
-from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.hashers import make_password, check_password
-from django.utils import timezone
-from datetime import timedelta
-import random
-from .models import User, RBAC
-#from .permissions import IsAdminUserRole # Your custom admin check
 from django.contrib.auth.models import Group
-from utils.permissions.base import IsAdminUserRole
-from .models import User, EmailOTP
-from utils.notifications.services import send_otp_via_email
 from django.core.cache import cache
 from django.db import transaction
+from rest_framework_simplejwt.tokens import RefreshToken
+from .models import User, RBAC
+from utils.permissions.base import *
 
 class SignupView(APIView):
     """Step 1: Store data temporarily and send OTP."""
@@ -30,63 +24,22 @@ class SignupView(APIView):
         if User.objects.filter(email=email).exists():
             return Response({"error": "User with this email already exists"}, status=status.HTTP_400_BAD_REQUEST)
 
-        
-        # Hash the password before saving it temporarily for security
         hashed_pw = make_password(password)
-
         pending_user_data = {
-                "email": email,
-                "password": hashed_pw,
-                "full_name": full_name,
-            }
-
-        #send_otp_via_email(email , pending_user_data)
-
-
-        # if send_otp_via_email(email, pending_user_data):
-        #     return Response({"message": "OTP sent. Please verify to complete registration."}, status=status.HTTP_200_OK)
-        # return Response({"error": "Failed to send email"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            "email": email,
+            "password": hashed_pw,
+            "full_name": full_name,
+        }
 
         try:
+            # Assuming this function handles Redis storage and SMTP
+            from utils.notifications.services import send_otp_via_email 
             send_otp_via_email(email, pending_user_data)
         except Exception as e:
-            return Response({"error": f"failed to send mail , error: {str(e)}"} , status=500)
+            return Response({"error": f"Failed to send mail, error: {str(e)}"}, status=500)
         
-        return Response({
-                "message": "OTP sent! Please verify to complete registration."
-            }, status=status.HTTP_200_OK)
+        return Response({"message": "OTP sent! Please verify to complete registration."}, status=status.HTTP_200_OK)
 
-
-#using db
-# class VerifyOTPView(APIView):
-#     """Step 2: Verify OTP and finally create the User."""
-#     permission_classes = [permissions.AllowAny]
-
-#     def post(self, request):
-#         email = request.data.get('email')
-#         otp = request.data.get('otp')
-
-#         expiry_limit = timezone.now() - timedelta(minutes=10)
-#         otp_record = EmailOTP.objects.filter(
-#             email=email, otp=otp, created_at__gte=expiry_limit
-#         ).first()
-
-#         if not otp_record:
-#             return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_400_BAD_REQUEST)
-
-#         # Create the actual User
-#         user = User.objects.create(
-#             email=email,
-#             full_name=otp_record.full_name,
-#             password=otp_record.password, # Already hashed
-#             role='user', # Default role
-#             is_active=True
-#         )
-
-#         # Clean up: Delete OTP record after successful verification
-#         otp_record.delete()
-
-#         return Response({"message": "Account created successfully. You can now login."}, status=status.HTTP_201_CREATED)
 class VerifyOTPView(APIView):
     """Step 2: Verify OTP from Redis and create the User."""
     permission_classes = [permissions.AllowAny]
@@ -95,35 +48,27 @@ class VerifyOTPView(APIView):
         email = request.data.get('email')
         otp_provided = request.data.get('otp')
 
-        # 1. Fetch data from Redis
         cache_key = f"otp_auth_{email}"
         cached_data = cache.get(cache_key)
 
-        # 2. Check if OTP exists and matches
         if not cached_data:
             return Response({"error": "OTP expired or not found"}, status=status.HTTP_400_BAD_REQUEST)
 
         if str(cached_data["otp"]) != str(otp_provided):
             return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 3. Create the actual User
-        # Note: Use create_user if you need Django to handle password hashing
-        # If the password was already hashed in Step 1, use create()
+        # Create user with default group='user' and role='none'
         user = User.objects.create(
             email=email,
             full_name=cached_data["full_name"],
             password=cached_data["password"], 
-            role='user', 
+            group='user', 
+            role='none',
             is_active=True
         )
 
-        # 4. Clean up: Remove from Redis immediately after success
         cache.delete(cache_key)
-
-        return Response(
-            {"message": "Account created successfully. You can now login."}, 
-            status=status.HTTP_201_CREATED
-        )
+        return Response({"message": "Account created successfully. You can now login."}, status=status.HTTP_201_CREATED)
 
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -133,101 +78,186 @@ class LoginView(APIView):
         password = request.data.get('password')
         user = User.objects.filter(email=email).first()
 
+        if not user:
+            return Response({"no user with the given password found , pls signup"})
+        
+        ##print(user.password)
+
+        if not check_password(password, user.password):
+            return Response({"wrong passwrod"})
+        
+        
         if user and check_password(password, user.password):
             refresh = RefreshToken.for_user(user)
             return Response({
                 "refresh": str(refresh),
                 "access": str(refresh.access_token),
-                "user": {"email": user.email, "role": user.role}
+                "user": {
+                    "email": user.email, 
+                    "group": user.group, 
+                    "role": user.role,
+                    "full_name": user.full_name
+                }
             })
-        return Response({"error": "Invalid credentials"}, status=401)
-
-class ViewAllUsers(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
-
-    def get(self, request):
-        users = User.objects.all()
-        data = [{"id": u.id, "name": u.full_name, "email": u.email, "role": u.role} for u in users]
-        return Response(data)
+        else:
+            return Response({"error": "Invalid credentials"}, status=401)
 
 class AssignRole(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
+    """Admin assigns Group and Role, then syncs RBAC."""
+    permission_classes = [permissions.IsAuthenticated,  HasRBACPermission]
+
+    required_area = "users"
+    required_role = "admin"
 
     def post(self, request, user_id):
-        new_role = request.data.get('role').lower()
+        new_group = request.data.get('group', '').lower()
+        new_role = request.data.get('role', 'none').lower()
+        
+        valid_groups = [c[0] for c in User.GROUP_CHOICES]
         valid_roles = [c[0] for c in User.ROLE_CHOICES]
 
-        if new_role not in valid_roles:
-            return Response({"error": "Invalid role"}, status=400)
+        if new_group not in valid_groups or new_role not in valid_roles:
+            return Response({"error": "Invalid group or role"}, status=400)
 
         try:
             with transaction.atomic():
                 user = User.objects.get(id=user_id)
+                user.group = new_group
                 user.role = new_role
-                if new_role == 'admin':
+                
+                # Special flags for Admin group
+                if new_group == 'admin':
                     user.is_staff = True
                     user.is_superuser = True
-                    user.save()
+                
+                user.save()
 
-            # 1. Sync Group
-                group_name = new_role.capitalize()
-                group, _ = Group.objects.get_or_create(name=group_name)
+                # Sync Django Group
+                django_group_name = new_group.capitalize()
+                django_group, _ = Group.objects.get_or_create(name=django_group_name)
                 user.groups.clear()
-                user.groups.add(group) # Link User to Group
+                user.groups.add(django_group)
 
-            # 2. Assign RBAC Permissions automatically based on role
-                self.setup_rbac_for_role(group, new_role)
+                # Setup RBAC Matrix rules for this Django Group
+                self.setup_rbac_for_logic(django_group, new_group, new_role)
 
-            return Response({"message": f"Updated {user.email} to {new_role} and synced RBAC rules."})
+            return Response({"message": f"Updated {user.email} to {new_group}({new_role}) and synced RBAC."})
         except User.DoesNotExist:
             return Response({"error": "User not found"}, status=404)
 
-    def setup_rbac_for_role(self, group, role):
-        """Helper to populate the RBAC table based on the assigned group."""
-    
-        if role == 'writer':
-        # Writers: Create and Read
-            RBAC.objects.get_or_create(application_group=group, application_area="content", application_role="write")
-            RBAC.objects.get_or_create(application_group=group, application_area="content", application_role="read")
-        
-        elif role == 'approver':
-        # Approvers: Read and Vote (Feedback), but NO Write/Update
-            RBAC.objects.get_or_create(application_group=group, application_area="content", application_role="read")
-            RBAC.objects.get_or_create(application_group=group, application_area="content", application_role="feedback")
-        
-        elif role == 'associate':
-        # Associates: Read ONLY
-            RBAC.objects.get_or_create(application_group=group, application_area="content", application_role="read")
-        
-        elif role == 'admin':
-        # Admins: Full access to everything
-            for area in ["content", "users", "reports"]:
-                RBAC.objects.get_or_create(application_group=group, application_area=area, application_role="admin")
+    def setup_rbac_for_logic(self, django_group, group, role):
+        """Maps your business workflow to the RBAC Matrix table."""
+        # Clear old rules for this group to prevent duplicates
+        RBAC.objects.filter(application_group=django_group).delete()
 
+        if group == 'admin':
+            for area in ["content", "users", "reports", "settings"]:
+                RBAC.objects.create(application_group=django_group, application_area=area, application_action="admin")
+        
+        elif group == 'executive':
+            RBAC.objects.create(application_group=django_group, application_area="content", application_action="read")
+            RBAC.objects.create(application_group=django_group, application_area="content", application_action="feedback")
+            RBAC.objects.create(application_group=django_group, application_area="content", application_action="promote")
 
-        #updating this check for any errors if occur - 17/2 (update the db ,run the seeding again)
-        #again updating it 18/2
-        # elif role == 'admin':
-        # # Admins: Full access to everything
-        #     for role in ["write", "read","feedback", "delete" , "admin"]:
-        #         RBAC.objects.get_or_create(application_group=group, application_area="content", application_role=role)
+        elif group == 'internal':
+            if role == 'writer':
+                RBAC.objects.create(application_group=django_group, application_area="content", application_action="write")
+                RBAC.objects.create(application_group=django_group, application_area="content", application_action="update")
+            elif role == 'reviewer':
+                RBAC.objects.create(application_group=django_group, application_area="content", application_action="update")
+                RBAC.objects.create(application_group=django_group, application_area="content", application_action="feedback")
+                RBAC.objects.create(application_group=django_group, application_area="content", application_action="promote")
 
-class PeopleWithoutRole(APIView):
+        elif group == 'external' and role == 'sme':
+            RBAC.objects.create(application_group=django_group, application_area="content", application_action="update")
+            RBAC.objects.create(application_group=django_group, application_area="content", application_action="feedback")
+
+class ViewAllUsers(APIView):
     """
-    Returns users who are still just 'user' and haven't been 
-    assigned to a professional role yet.
+    Returns every user in the system.
+    Only accessible by Admins.
     """
-    permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+
+    required_area = "users"
+    required_role = "admin"
 
     def get(self, request):
-        # We filter for the default 'user' role
-        users = User.objects.filter(role='user')
+        users = User.objects.all().order_by('-date_joined')
         data = [
             {
                 "id": u.id, 
                 "full_name": u.full_name, 
-                "email": u.email,
-                "role": u.role
+                "email": u.email, 
+                "group": u.group, 
+                "role": u.role,
+                "is_active": u.is_active
             } for u in users
         ]
         return Response(data, status=status.HTTP_200_OK)
+
+class DeleteUser(APIView):
+    """View to allow Admin to permanently delete a user."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+
+    required_area = "users"
+    required_role = "admin"
+
+    def delete(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+
+            print(user.full_name)
+            
+            # Prevent admin from deleting themselves accidentally
+            if user == request.user:
+                return Response({"error": "You cannot delete your own admin account."}, status=400)
+            
+            email = user.email
+            user.delete()
+            return Response({"message": f"User {email} has been permanently deleted."}, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            return Response({"error": str(e)})
+
+class PeopleWithoutRole(APIView):
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+
+    required_area = "users"
+    required_role = "admin"
+
+    def get(self, request):
+        # Users who are still in the default 'user' group
+        users = User.objects.filter(group='user')
+        data = [{"id": u.id, "full_name": u.full_name, "email": u.email, "group": u.group} for u in users]
+        return Response(data, status=status.HTTP_200_OK)
+    
+class AdminUserRBACListView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area = "users"  # Changed to 'users' area
+    required_roles = ["admin"]
+
+    def get(self, request):
+        try:
+            user_list = []
+            users = User.objects.all()
+
+            for user in users:
+            # We use __iexact to bridge the gap between 'internal' and 'Internal'
+                actions = RBAC.objects.filter(
+                    application_group__name__iexact=user.group 
+                ).values('application_area', 'application_action')
+
+                user_list.append({
+                    'id': user.id,
+                    'full_name': user.full_name,
+                    'email': user.email,
+                    'group': user.group,
+                    'role': user.role,
+                    'permissions': list(actions)
+                })
+    
+            return Response({"count": len(user_list), "users": user_list})
+
+        except Exception as e:
+            return Response({"error": str(e)})

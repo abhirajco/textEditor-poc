@@ -1,203 +1,191 @@
 ### Variables
 @baseUrl = http://127.0.0.1:8000/api
+@base2Url = http://127.0.0.1:8000/api/content
+@password = Pass123!
+@adminPass = AdminPassword123
+
+# @adminEmail = admin@insight.com
+# @adminPass = Pass123!
+
+# Article ID for testing (Update after creation)
+
+@smeToken = {{sme_login.response.body.access}}
 @writerToken = {{writer_login.response.body.access}}
-@approverToken = {{approver_login.response.body.access}}
-@adminToken = {{admin_login.response.body.access}}
-@associateToken = {{associate_login.response.body.access}}
+@execToken = {{exec_login.response.body.access}}
+@adminToken = {{adminLogin.response.body.access}}
+@reviewerToken = {{reviewerLogin.response.body.access}}
+@articleId = 1
 
-@writer2Token =  {{writer2_login.response.body.access}}
-
-@associate2Token = {{associate2_login.response.body.access}}
 # ==========================================
-# 1. AUTHENTICATION
+# 1. AUTHENTICATION (Login for all roles)
 # ==========================================
 
-### Login as Writer
-# @name writer2_login
+### Login as Admin
+# @name adminLogin
 POST {{baseUrl}}/accounts/login/
 Content-Type: application/json
 
 {
-    "email": "user@insight.com",
-    "password": "InSight2026!"
+    "email": "admin@insight.com",
+    "password": "{{adminPass}}"
 }
 
 ###
 
+
+### Login as Executive
+# @name exec_login
+POST {{baseUrl}}/accounts/login/
+Content-Type: application/json
+
+{
+    "email": "exec@insight.com",
+    "password": "{{password}}"
+}
+
+###
+
+
+### Login as Writer
 # @name writer_login
 POST {{baseUrl}}/accounts/login/
 Content-Type: application/json
 
 {
     "email": "writer@insight.com",
-    "password": "InSight2026!"
+    "password": "{{password}}"
 }
 
+###
 
-
-### Login as Approver
-# @name approver_login
+### Login as SME
+# @name sme_login
 POST {{baseUrl}}/accounts/login/
 Content-Type: application/json
 
 {
-    "email": "approver@insight.com",
-    "password": "InSight2026!"
+    "email": "sme@insight.com",
+    "password": "{{password}}"
 }
 
-### Login as Admin
-# @name admin_login
+###
+
+### Login as reviwer
+# @name reviewerLogin
 POST {{baseUrl}}/accounts/login/
 Content-Type: application/json
 
 {
-    "email": "admin@insight.com",
-    "password": "InSight2026!"
+    "email": "reviewer@insight.com",
+    "password": "{{password}}"
 }
 
-### Login as Associate
-# @name associate_login
-POST {{baseUrl}}/accounts/login/
-Content-Type: application/json
 
-{
-    "email": "associate@insight.com",
-    "password": "InSight2026!"
-}
-
-### Login as Associate
-# @name associate2_login
-POST {{baseUrl}}/accounts/login/
-Content-Type: application/json
-
-{
-    "email": "associate2@insight.com",
-    "password": "InSight2026!"
-}
-
+### Variables
+# @baseUrl = http://127.0.0.1:8000/api/content
+# @writerToken = your_writer_jwt_here
+# @smeToken = your_sme_jwt_here
+# = your_reviewer_jwt_here
+# @adminToken = your_admin_jwt_here
+# @articleId = 1
 
 # ==========================================
-# 2. CONTENT CREATION & EDITING (WRITER)
+# 1. WRITER FLOW
 # ==========================================
 
-### CREATE: Writer starts a new story
-# Note: This creates Article ID 1 and Version 1. Flag is assigned to this user.
-POST {{baseUrl}}/content/articles/
-Authorization: Bearer {{writer2Token}}
-Content-Type: application/json
-
-{
-    "title": "draft4",
-    "content": "testing dtafts"
-}
-
-### LIST: View all drafts (Admins/Approvers see all, Writers see their own/flagged)
-GET {{baseUrl}}/content/articles/list/
-Authorization: Bearer {{approverToken}}
-
-Authorization: Bearer {{writerToken}}
-
-Authorization: Bearer {{adminToken}}
-# Authorization: Bearer {{writerToken}}
-# 
-
-### EDIT: Update content (Creates Version 2)
-# Only works if the user holds the 'flag_holder' status
-PUT {{baseUrl}}/content/articles/4/edit/
-Authorization: Bearer {{writer2Token}}
-Content-Type: application/json
-
-{
-    "content": "REVISION 1: Room temperature stability confirmed by three independent labs."
-}
-
-### TRANSFER: Pass the flag to another writer
-# Use the ID of another writer in your database
-POST {{baseUrl}}/content/articles/1/transfer/
+### Create a new Draft
+POST {{baseUrl}}/content/articles/create/
 Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 
 {
-    "new_holder_id": 7
+    "title": "draft3",
+    "content": "draft3 content"
 }
 
-# ==========================================
-# 3. REVIEW & FEEDBACK (APPROVER)
-# ==========================================
+### Lock the article to start editing
+POST {{base2Url}}/articles/5/lock/
+Authorization: Bearer {{smeToken}}
+# Authorization: Bearer {{reviewerToken}}
 
-### FEEDBACK: Approver votes on the LATEST version
-POST {{baseUrl}}/content/articles/1/feedback/
-Authorization: Bearer {{approverToken}}
+Authorization: Bearer {{writerToken}}
+
+### Unlock article
+DELETE {{base2Url}}/articles/3/lock/
+Authorization: Bearer {{writerToken}}
+
+### Edit the article (Must hold lock)
+PUT {{base2Url}}/articles/5/edit/
+Authorization: Bearer {{smeToken}}
+# Authorization: Bearer {{reviewerToken}} 
+#Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 
 {
-    "vote": false,
-    "comment": "change this"
+    "content": "Edit1"
 }
 
-### HISTORY: Check audit trail (See all edits and their specific feedback)
-#visible by all , even all writers
-# GET {{baseUrl}}/content/articles/3/history/
-# Authorization: Bearer {{writer2Token}}
+
 
 # ==========================================
-# 4. FINAL DECISION (ADMIN ONLY)
+# 2. REVIEWER FLOW (ASSIGNMENT)
 # ==========================================
 
-### REJECT: Admin sends it back for more work
-POST {{baseUrl}}/content/articles/2/admin-review/
-Authorization: Bearer {{adminToken}}
+### Assign an SME to the article
+POST {{base2Url}}/articles/5/assign-sme/
+Authorization: Bearer {{reviewerToken}}
 Content-Type: application/json
 
 {
-    "action": "reject"
+    "sme_id": 5
 }
 
-### PUBLISH: Admin moves it to PublishedContent table
-POST {{baseUrl}}/content/articles/1/admin-review/
-Authorization: Bearer {{adminToken}}
+# ==========================================
+# 3. SME FLOW (TECHNICAL REVIEW)
+# ==========================================
+
+
+#even if not onborded om the content still aproving
+### SME Technical Approval (Moves to Pending Executive)
+POST {{base2Url}}/articles/5/approve/
+Authorization: Bearer {{execToken}}
+# Authorization: Bearer {{smeToken}}
+
+# ==========================================
+# 4. ADMIN / EXECUTIVE FLOW
+# ==========================================
+
+### Admin/Exec Comment (Kicks back to Draft)
+POST {{base2Url}}/articles/4/comment/
+Authorization: Bearer {{reviewerToken}}
 Content-Type: application/json
 
 {
-    "action": "publish"
+    "comment_text": "comment1"
 }
 
-# ==========================================
-# 5. CONSUMPTION (ASSOCIATE/EVERYONE)
-# ==========================================
-
-### LIST PUBLISHED: Final articles only
-
-GET {{baseUrl}}/content/published/
-Authorization: Bearer {{associate2Token}}
-
-Authorization: Bearer {{approverToken}}
-
+### Final Admin Approval (Publish)
+# (Note: Status must be 'pending_admin' for this to work)
+POST {{base2Url}}/articles/4/approve/
 Authorization: Bearer {{adminToken}}
 
+# ==========================================
+# 5. AUDIT & HISTORY
+# ==========================================
 
-
-
-### flag view by admin and approver
-#working fine
-GET {{baseUrl}}/content/flag/view/
+### View Full Version History
+GET {{base2Url}}/articles/4/history/
 Authorization: Bearer {{adminToken}}
 
-Authorization: Bearer {{approverToken}}
+### View Active (Unpublished) Articles
+GET {{base2Url}}/articles/active/
+Authorization: Bearer {{writerToken}}
 
+###
 
+GET {{base2Url}}/articles/4/comments/
+Authorization: Bearer {{reviewerToken}}
 
-
-
-
-
-### 1. View Dashboard (Check if you see your own/all drafts)
-#only for latest version, only for writers who has writen or hold draft, and approver not admin
-# GET {{baseUrl}}/content/drafts/dashboard/
-# Authorization: Bearer {{approverToken}}
-# Authorization: Bearer {{adminToken}}
-# 
-
-### 2. View History for Draft ID 1 (only writer thas has writen it,no one else and approver(not even admin )
-# GET {{baseUrl}}/content/drafts/1/history/
-# Authorization: Bearer {{adminToken}}
+###
+GET {{base2Url}}/articles/published/
+Authorization: Bearer {{reviewerToken}}

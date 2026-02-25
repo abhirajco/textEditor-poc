@@ -1,122 +1,159 @@
-# ### Variables
-# @baseUrl = http://127.0.0.1:8000/api/accounts
-# @email=aryantiwary2003@gmail.com
-# @password = StrongPass123!
-# @fullName = Aryan Tiwary
+### Variables
+@baseUrl = http://127.0.0.1:8000/api/accounts
+@adminEmail = admin@insight.com
+@adminPass = Pass123!
+@newUserEmail = testuser@example.com
+@password = Pass123!
 
-# ############################################################
-# # 1. SIGNUP (Triggers OTP Email)
-# ############################################################
+#########################################
+# 1. ADMIN LOGIN (To get access for Admin tasks)
+#########################################
 POST {{baseUrl}}/signup/
 Content-Type: application/json
 
 {
-    "email": "associate2@insight.com",
-    "password": "InSight2026!",
-    "full_name":  "Associate"
+    "email": "{{newUserEmail}}",
+    "full_name": "John Doe",
+    "password": "UserPass123!"
 }
 
-####
 
-# ############################################################
-# # 2. VERIFY OTP (Run this after checking your email)
-# # Replace "123456" with the actual code from your email
-# ############################################################
+#########################################
+# 3. VERIFY OTP (Step 2)
+#########################################
+# Check your VS Code Terminal for the 6-digit code!
 POST {{baseUrl}}/verify-otp/
 Content-Type: application/json
 
 {
-    "email": "associate2@insight.com",
-    "otp": "129802"
+    "email": "{{newUserEmail}}",
+    "otp": "812092" 
 }
 
-# ###
 
-# ############################################################
-# # 3. LOGIN (Returns JWT Access & Refresh Tokens)
-# ############################################################
-# # @name login
-# POST {{baseUrl}}/login/
-# Content-Type: application/json
-
-# {
-#     "email": "{{email}}",
-#     "password": "SecurePassword123"
-# }
-
-# ###
-
-# ############################################################
-# # 4. LOGOUT (Requires Access Token in Header)
-# ############################################################
-# @refreshToken = {{login.response.body.refresh}}
-# @accessToken = {{login.response.body.access}}
-
-# POST {{baseUrl}}/logout/
-# Authorization: Bearer {{accessToken}}
-# Content-Type: application/json
-
-# {
-#     "refresh": "{{refreshToken}}"
-# }
+#########################################
+# 4. ADMIN: LIST PENDING USERS
+#########################################
+# Get users who haven't been assigned a specific role yet
+GET {{baseUrl}}/users/pending/
+Authorization: Bearer {{adminToken}}
 
 
-### Variables
-@baseUrl = http://127.0.0.1:8000/api/accounts
-@adminEmail = admin@insight.com
-@password = InSight2026!
+#########################################
+# 5. ADMIN: ASSIGN ROLE & GROUP
+#########################################
+### A. First, Get the ID of John Doe from the list above. 
+### B. Replace '2' with his actual ID.
+POST {{baseUrl}}/users/assign/1/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
 
-### 1. LOGIN AS ADMIN
-# This will give you the access token needed for other requests
-# @name login
+{
+    "group": "admin",
+    "role": "admin"
+}
+
+
+#########################################
+# 6. ADMIN: DELETE A USER
+#########################################
+### Replace '3' with the ID of the user you want to remove
+DELETE {{baseUrl}}/users/delete/6/
+Authorization: Bearer {{adminToken}}
+
+
+#########################################
+
+
+#########################################
+# 1. ADMIN LOGIN (The Controller)
+#########################################
+# @name adminLogin
 POST {{baseUrl}}/login/
 Content-Type: application/json
 
 {
-    "email": "{{adminEmail}}",
+    "email": "admin@insight.com",
+    "password": "{{adminPass}}"
+}
+
+###
+@adminToken = {{adminLogin.response.body.access}}
+
+### Admin: View All Users
+GET {{baseUrl}}/users/all/
+Authorization: Bearer {{adminToken}}
+
+---
+
+#########################################
+# 2. EXECUTIVE LOGIN (The Approver)
+#########################################
+# @name execLogin
+POST {{baseUrl}}/login/
+Content-Type: application/json
+
+{
+    "email": "exec@insight.com",
     "password": "{{password}}"
 }
 
-### Capture the token from the response above
-@accessToken = {{login.response.body.access}}
-@refreshToken = {{login.response.body.refresh}}
+###
+@execToken = {{execLogin.response.body.access}}
 
+---
 
-### 2. VIEW ALL USERS (Admin Only)
-# Uses the HasRBACPermission / IsAdminUserRole
-GET {{baseUrl}}/view-all/
-Authorization: Bearer {{accessToken}}
-
-
-### 3. VIEW UNASSIGNED PEOPLE
-# This shows everyone with role='user'
-GET {{baseUrl}}/unassigned/
-Authorization: Bearer {{accessToken}}
-
-
-### 4. ASSIGN A NEW ROLE
-# Replace "2" with an actual User ID from the View All list
-# Try changing a 'user' to a 'writer'
-POST {{baseUrl}}/assign-role/8/
-Authorization: Bearer {{accessToken}}
+#########################################
+# 3. WRITER LOGIN (The Creator)
+#########################################
+# @name writerLogin
+POST {{baseUrl}}/login/
 Content-Type: application/json
 
 {
-    "role": "associate"
+    "email": "writer@insight.com",
+    "password": "{{password}}"
 }
 
+###
+@writerToken = {{writerLogin.response.body.access}}
 
-### 5. REFRESH TOKEN
-# Use this when your access token expires (after 30 mins)
-POST {{baseUrl}}/token/refresh/
+---
+
+#########################################
+# 4. SME LOGIN (The External Expert)
+#########################################
+# @name smeLogin
+POST {{baseUrl}}/login/
 Content-Type: application/json
 
 {
-    "refresh": "{{refreshToken}}"
+    "email": "sme@insight.com",
+    "password": "{{password}}"
 }
 
 
+###
+@smeToken = {{smeLogin.response.body.access}}
+
+---
+
+#########################################
+# 5. TEST PERMISSION (Example)
+#########################################
+### Try to view users as a WRITER (Should return 403 Forbidden)
+GET {{baseUrl}}/users/all/
+Authorization: Bearer {{execToken}}
+
+Authorization: Bearer {{smeToken}}
+
+Authorization: Bearer {{writerToken}}
+
+### Try to view users as an ADMIN (Should return 200 OK)
+GET {{baseUrl}}/users/all/
+Authorization: Bearer {{adminToken}}
 
 
-#id - 1,7,4 - writer
-#id - 5,2 - approver
+###
+GET {{baseUrl}}/user-rbac-audit/
+Authorization: Bearer {{adminToken}}
