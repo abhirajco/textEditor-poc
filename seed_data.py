@@ -44,9 +44,9 @@ def seed_data():
             # Seed RBAC for this specific group/role
             seed_rbac_rules(django_group, data['group'], data['role'])
             
-            print(f"✅ Created {data['email']} ({data['group']}/{data['role']})")
+            print(f" Created {data['email']} ({data['group']}/{data['role']})")
         else:
-            print(f"🟡 {data['email']} already exists.")
+            print(f" {data['email']} already exists.")
 
 def seed_rbac_rules(django_group, group, role):
     """Matches the logic in your AssignRole view to ensure the matrix is populated."""
@@ -71,6 +71,7 @@ def seed_rbac_rules(django_group, group, role):
     elif group == 'external' and role == 'sme':
         RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="update")
         RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="feedback")
+        RBAC.objects.get_or_create(application_group=django_group, application_area="content", application_action="promote")
 
 if __name__ == "__main__":
     seed_data()

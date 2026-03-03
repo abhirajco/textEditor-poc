@@ -12,6 +12,27 @@ python manage.py migrate
 python manage.py shell --for pyhton shell in terminal
 
 
+python seed_data.py
+
+
+# Check which files have been modified
+git status
+
+# Add all files to the staging area
+git add .
+
+# Commit with a descriptive message
+git commit -m ""
+
+# Check your current branch
+git branch
+
+# If you aren't on feature/rbac-update, switch to it:
+git checkout feature/rbac-update
+
+git push origin feature/rbac-update
+
+
 
 #content publishing is not working
 #mailing system is not working

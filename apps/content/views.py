@@ -305,20 +305,20 @@ class ArticleEdit(APIView):
     required_roles = ["update", "write"] 
 
     def put(self, request, pk):
+        
+        title = request.data.get('title')
         content = request.data.get('content')
-        if not content:
-            return Response({"error": "Content is required."}, status=400)
+        
+        if not title or not content:
+            return Response({"error": "Both Title and Content are required."}, status=400)
 
         try:
             with transaction.atomic():
-                # Lock the article for the duration of the save
+                # select_for_update() keeps requests in a queue
                 article = Article.objects.select_for_update().get(pk=pk)
                 user = request.user
 
-                #print(article , user)
-
-                # 1. DEFINE AUTHORIZED USERS
-                #can remove 2 if , just chekc is locked....bypass securtity but faster resposne
+                # 1. AUTHORIZATION CHECK
                 is_author = (article.author == user)
                 is_reviewer = (user.role == 'reviewer')
                 is_assigned_sme = (
@@ -326,56 +326,51 @@ class ArticleEdit(APIView):
                     ArticleAssignment.objects.filter(article=article, sme=user).exists()
                 )
 
-                # 2. CHECK AUTHORIZATION (Admin is intentionally excluded here)
                 if not (is_author or is_reviewer or is_assigned_sme):
                     return Response({
-                        "error": "Access Denied. Only the Author, Reviewer, or Assigned SME can edit content."
+                        "error": "Access Denied. Only Author, Reviewer, or Assigned SME can edit."
                     }, status=403)
 
-                # 3. CHECK LOCK STATUS
-                #yaha code fata hh, frontend se manage ho skta hh
-                #agar article lock ni hh, to full_name kabhi access ni hone payega error throw hoga
-                #frontend me edit button pe hi locking system lga skte hh
-                #ya hm hi thk kr dete hh
-
-                #print(type(article.locked_by))
-
+                # 2. LOCK VALIDATION (Fixing the crash)
                 if article.locked_by is None:
-                    return Response ({"error": "Article is not locked. You must acquire the lock before editing."}, status=423)
-
-    #             if not article.locked_by:
-    # return Response({
-    #     "error": "Article is not locked. You must acquire the lock before editing."
-    # }, status=423)
-                if article.locked_by != user:
                     return Response({
-                        "error": f"Article is locked by {article.locked_by.full_name}. You must hold the lock to edit."
+                        "error": "Article is not locked. Acquire the lock first."
                     }, status=423)
 
-                # 4. SAVE AUDIT VERSION
+                if article.locked_by != user:
+                    # Added safe access to full_name
+                    owner_name = getattr(article.locked_by, 'full_name', 'Another User')
+                    return Response({
+                        "error": f"Article is locked by {owner_name}. You cannot edit."
+                    }, status=423)
+
+                # 3. SAVE VERSION (Storing Title + Body)
                 ArticleVersion.objects.create(
                     article=article,
-                    content=content,
+                    title=title,    # Saving historical title
+                    content=content, # Saving historical content
                     changed_by=user
                 )
 
-                # 5. COMMIT CHANGES
-                article.locked_by = None
+                # 4. COMMIT CHANGES TO MAIN ARTICLE
+                article.title = title       # Update Title
+                article.content = content   # Update Content
+                article.locked_by = None    # Auto-unlock after save
                 article.locked_at = None
-                article.content = content
                 article.updated_at = timezone.now()
+                
+                # Clean Caches
                 cache.delete("active_articles_list")
                 cache.delete(f"article_comments_{pk}")
+                
                 article.save()
 
-                return Response({"message": "Content updated successfully."})
+                return Response({"message": "Article (Title & Content) updated and versioned successfully."})
 
-        # except Article.DoesNotExist:
-        #     return Response({"error": "Article not found."}, status=404)
-
+        except Article.DoesNotExist:
+            return Response({"error": "Article not found."}, status=404)
         except Exception as e:
-            return Response({"error": str(e)} ,status=500)
-
+            return Response({"error": str(e)}, status=500)
 
 #10
 class ArticleVersionHistory(APIView):

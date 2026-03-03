@@ -139,6 +139,7 @@ class ArticleVersion(models.Model):
         on_delete=models.CASCADE, 
         related_name='versions'
     )
+    title = models.CharField(max_length=255)
     content = models.TextField()
     changed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
