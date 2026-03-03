@@ -4,6 +4,7 @@ from django.core.cache import cache
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from .models import Article, ArticleAssignment, ArticleComment, ArticleVersion
 from accounts.models import User
 from utils.notifications.services import handle_mentions_and_notifications, send_approval_emails, send_assigned_sme_emails
@@ -117,18 +118,29 @@ class ArticleCreate(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
     required_roles = ["write"]
+    parser_classes = (MultiPartParser, FormParser) # Added for Image
 
     def post(self, request):
         title = request.data.get('title')
         content = request.data.get('content')
+        image = request.FILES.get('image')
 
         try:
             with transaction.atomic():
                 article = Article.objects.create(
                     title=title,
                     content=content,
+                    image=image,
                     author=request.user,
                     status='draft'
+                )
+
+                ArticleVersion.objects.create(
+                    article=article,
+                    title=title,
+                    content=content,
+                    image_url=article.image.url if article.image else None,
+                    changed_by=request.user
                 )
 
                 cache.delete("active_articles_list")
@@ -156,6 +168,7 @@ class ArticleDetailView(APIView):
                 "id": article.id,
                 "title": article.title,
                 "content": article.content,
+                "image_url": article.image.url if article.image else None, 
                 "status": article.status,
                 "author": article.author.full_name,
                 "locked_by": article.locked_by.full_name if article.locked_by else None,
@@ -303,12 +316,14 @@ class ArticleEdit(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
     required_roles = ["update", "write"] 
+    parser_classes = (MultiPartParser, FormParser)
 
     def put(self, request, pk):
         
         title = request.data.get('title')
         content = request.data.get('content')
-        
+        image_file = request.FILES.get('image')
+
         if not title or not content:
             return Response({"error": "Both Title and Content are required."}, status=400)
 
@@ -349,12 +364,15 @@ class ArticleEdit(APIView):
                     article=article,
                     title=title,    # Saving historical title
                     content=content, # Saving historical content
+                    image_url=article.image.url if article.image else None,
                     changed_by=user
                 )
 
                 # 4. COMMIT CHANGES TO MAIN ARTICLE
                 article.title = title       # Update Title
                 article.content = content   # Update Content
+                if image_file:
+                    article.image = image_file
                 article.locked_by = None    # Auto-unlock after save
                 article.locked_at = None
                 article.updated_at = timezone.now()
@@ -406,6 +424,8 @@ class ArticleVersionHistory(APIView):
                     "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
                     "role": v.changed_by.role if v.changed_by else "N/A",
                     "timestamp": v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "title": v.title, # Added
+                    "image_url": v.image_url,
                     "content_preview": v.content[:100] + "..." # Snippet for the list
                 })
 

@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.db import transaction
+from cloudinary.models import CloudinaryField
 
 class Article(models.Model):
     STATUS_CHOICES = [
@@ -13,6 +14,7 @@ class Article(models.Model):
 
     title = models.CharField(max_length=255)
     content = models.TextField()
+    image = CloudinaryField('image', null=True, blank=True)
     
     # Relationships
     # Index 1: Speeds up "My Articles" dashboard
@@ -141,6 +143,7 @@ class ArticleVersion(models.Model):
     )
     title = models.CharField(max_length=255)
     content = models.TextField()
+    image_url = models.URLField(max_length=500, null=True, blank=True)
     changed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
         on_delete=models.SET_NULL, 
