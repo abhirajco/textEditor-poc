@@ -15,7 +15,7 @@ from django.db.models import OuterRef, Subquery
 # --- 1. LIST VIEWS ---
 #non published articles
 class ActiveArticleListView(APIView):
-    """Returns drafts, pending_executive, and pending_admin."""
+    
     permission_classes = [HasRBACPermission]
     required_area = "content"
     required_roles = ["read", "write", "feedback", "admin"]
@@ -36,7 +36,7 @@ class ActiveArticleListView(APIView):
 
         return Response(serializer.data)
 
-#2
+#2 published article
 class PublishedArticleListView(APIView):
    
     permission_classes = [HasRBACPermission]
@@ -59,9 +59,9 @@ class PublishedArticleListView(APIView):
         return Response(serializer.data)
 
 
-# --- 3. WORKFLOW & ACTIONS ---
+# --- 3. for commenting ---
 class WriteComment(APIView):
-    #Add feedback, trigger @mention emails, and handle Kick-Backs to Draft
+    #Add feedback, trigger @mention emails
     permission_classes = [HasRBACPermission]
     required_area = "content"
     required_roles = ["feedback", "admin"]
@@ -77,7 +77,7 @@ class WriteComment(APIView):
                     if not ArticleAssignment.objects.filter(article=article, sme=request.user).exists():
                         return Response({"error": "Not assigned to this article."}, status=403)
 
-                # EXPLICIT BUSINESS LOGIC: If Exec or Admin comments, it kicks back to Draft
+                # If Exec or Admin comments, it kicks back to Draft
                 # if request.user.role in ['executive', 'admin']:
                 article.status = 'draft'
                 article.locked_by = None # Unlock it so writers can fix it
@@ -105,10 +105,18 @@ class WriteComment(APIView):
                 
         except Article.DoesNotExist:
             return Response({"error": "Article not found."}, status=404)
+        
+        except Exception as e:
+            return Response({"error": str(e)})
 
-#4
+
+
+#4 article writing
 class ArticleCreate(APIView):
-    # ... permissions and area same as before ...
+    
+    permission_classes = [HasRBACPermission]
+    required_area = "content"
+    required_roles = ["write"]
 
     def post(self, request):
         title = request.data.get('title')
@@ -134,7 +142,7 @@ class ArticleCreate(APIView):
 
 #5 - when a version is clicked then all the details will be shown
 class ArticleDetailView(APIView):
-    """Anyone with content access can view an article."""
+   
     permission_classes = [HasRBACPermission]
     required_area = "content"
     required_roles = ["read", "write", "feedback", "admin"] 
@@ -161,7 +169,7 @@ class ArticleLock(APIView):
    
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["write", "feedback"] # Writers and Reviewers/SMEs can lock
+    required_roles = ["write", "update"] # Writers and Reviewers/SMEs can lock
 
     def post(self, request, pk):
         with transaction.atomic():
@@ -467,3 +475,48 @@ class ArticleCommentHistoryView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+#12
+class CommentEditDelete(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area = "content"
+    required_roles = ["feedback", "admin"] # Roles allowed to access the endpoint
+
+    def patch(self, request, comment_id):
+        """Strictly only the writer can edit."""
+        try:
+            comment = ArticleComment.objects.get(id=comment_id)
+            
+            # REMOVED Admin check: ONLY the writer is allowed
+            if comment.user != request.user:
+                return Response({"error": "Ownership Required: You did not write this comment."}, status=403)
+
+            new_text = request.data.get('comment_text')
+            if not new_text:
+                return Response({"error": "Comment text is required."}, status=400)
+
+            comment.comment_text = new_text
+            comment.save()
+
+            cache.delete(f"article_comments_{comment.article.id}")
+            return Response({"message": "Comment updated."})
+            
+        except ArticleComment.DoesNotExist:
+            return Response({"error": "Comment not found."}, status=404)
+
+    def delete(self, request, comment_id):
+        """Strictly only the writer can delete."""
+        try:
+            comment = ArticleComment.objects.get(id=comment_id)
+            
+            # STRICT Check: request.user must match comment.user exactly
+            if comment.user != request.user:
+                return Response({"error": "Access Denied: You can only delete your own comments."}, status=403)
+
+            article_id = comment.article.id
+            comment.delete()
+            
+            cache.delete(f"article_comments_{article_id}")
+            return Response({"message": "Comment removed."})
+
+        except ArticleComment.DoesNotExist:
+            return Response({"error": "Comment not found."}, status=404)

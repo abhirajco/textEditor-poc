@@ -166,7 +166,7 @@ Content-Type: application/json
 
 ### Final Admin Approval (Publish)
 # (Note: Status must be 'pending_admin' for this to work)
-POST {{base2Url}}/articles/4/approve/
+POST {{base2Url}}/articles/5/approve/
 Authorization: Bearer {{adminToken}}
 
 # ==========================================
@@ -174,7 +174,7 @@ Authorization: Bearer {{adminToken}}
 # ==========================================
 
 ### View Full Version History
-GET {{base2Url}}/articles/4/history/
+GET {{base2Url}}/articles/3/history/
 Authorization: Bearer {{adminToken}}
 
 ### View Active (Unpublished) Articles
@@ -189,3 +189,13 @@ Authorization: Bearer {{reviewerToken}}
 ###
 GET {{base2Url}}/articles/published/
 Authorization: Bearer {{reviewerToken}}
+
+
+###
+POST {{base2Url}}/articles/4/comment/
+Content-Type: application/json
+Authorization: Bearer {{writerToken}}
+
+{
+    "comment_text": "comment3 @aryantiwary2003@gmail.com, please review the security section of this draft."
+}

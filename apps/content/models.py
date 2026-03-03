@@ -59,10 +59,8 @@ class Article(models.Model):
 
 
 class ArticleAssignment(models.Model):
-    """
-    Business Logic: Tracks which External Members (SMEs) are 
-    appointed to specific articles by Reviewers.
-    """
+    
+    #for smes assignemnet
     article = models.ForeignKey(
         Article, 
         on_delete=models.CASCADE, 

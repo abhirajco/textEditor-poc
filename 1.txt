@@ -69,6 +69,7 @@ notifications also
 #send emails to sme which are getting appointed
 #email system when content is begin edited, except who is editing it should go to all concerned person
 #lock should be relased once edited
+#have to change rbac....(it was just for testing purpose, after frontend configuration change the access)
 
 
 

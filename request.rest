@@ -1,9 +1,11 @@
 ### Variables
 @baseUrl = http://127.0.0.1:8000/api/accounts
 @adminEmail = admin@insight.com
-@adminPass = Pass123!
+@adminPass = AdminPassword123
 @newUserEmail = testuser@example.com
 @password = Pass123!
+
+#for jhon doe it is "password": "UserPass123!"
 
 #########################################
 # 1. ADMIN LOGIN (To get access for Admin tasks)
@@ -12,9 +14,9 @@ POST {{baseUrl}}/signup/
 Content-Type: application/json
 
 {
-    "email": "{{newUserEmail}}",
-    "full_name": "John Doe",
-    "password": "UserPass123!"
+    "email": "aryantiwary20031@gmail.com",
+    "full_name": "Aryan",
+    "password": "{{password}}"
 }
 
 
@@ -26,8 +28,8 @@ POST {{baseUrl}}/verify-otp/
 Content-Type: application/json
 
 {
-    "email": "{{newUserEmail}}",
-    "otp": "812092" 
+    "email": "aryantiwary2003@gmail.com",
+    "otp": "217067" 
 }
 
 
@@ -143,6 +145,8 @@ Content-Type: application/json
 #########################################
 ### Try to view users as a WRITER (Should return 403 Forbidden)
 GET {{baseUrl}}/users/all/
+Authorization: Bearer {{adminToken}}
+
 Authorization: Bearer {{execToken}}
 
 Authorization: Bearer {{smeToken}}

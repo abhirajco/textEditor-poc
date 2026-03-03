@@ -8,9 +8,11 @@ from django.db import transaction
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User, RBAC
 from utils.permissions.base import *
+from utils.notifications.services import send_otp_via_email 
+
 
 class SignupView(APIView):
-    """Step 1: Store data temporarily and send OTP."""
+   
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -32,8 +34,6 @@ class SignupView(APIView):
         }
 
         try:
-            # Assuming this function handles Redis storage and SMTP
-            from utils.notifications.services import send_otp_via_email 
             send_otp_via_email(email, pending_user_data)
         except Exception as e:
             return Response({"error": f"Failed to send mail, error: {str(e)}"}, status=500)
@@ -41,7 +41,7 @@ class SignupView(APIView):
         return Response({"message": "OTP sent! Please verify to complete registration."}, status=status.HTTP_200_OK)
 
 class VerifyOTPView(APIView):
-    """Step 2: Verify OTP from Redis and create the User."""
+   
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -52,7 +52,7 @@ class VerifyOTPView(APIView):
         cached_data = cache.get(cache_key)
 
         if not cached_data:
-            return Response({"error": "OTP expired or not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST)
 
         if str(cached_data["otp"]) != str(otp_provided):
             return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
@@ -103,7 +103,7 @@ class LoginView(APIView):
             return Response({"error": "Invalid credentials"}, status=401)
 
 class AssignRole(APIView):
-    """Admin assigns Group and Role, then syncs RBAC."""
+    
     permission_classes = [permissions.IsAuthenticated,  HasRBACPermission]
 
     required_area = "users"
@@ -146,8 +146,8 @@ class AssignRole(APIView):
             return Response({"error": "User not found"}, status=404)
 
     def setup_rbac_for_logic(self, django_group, group, role):
-        """Maps your business workflow to the RBAC Matrix table."""
-        # Clear old rules for this group to prevent duplicates
+    
+       
         RBAC.objects.filter(application_group=django_group).delete()
 
         if group == 'admin':
@@ -171,6 +171,7 @@ class AssignRole(APIView):
         elif group == 'external' and role == 'sme':
             RBAC.objects.create(application_group=django_group, application_area="content", application_action="update")
             RBAC.objects.create(application_group=django_group, application_area="content", application_action="feedback")
+            RBAC.objects.create(application_group=django_group, application_area="content", application_action="promote")
 
 class ViewAllUsers(APIView):
     """

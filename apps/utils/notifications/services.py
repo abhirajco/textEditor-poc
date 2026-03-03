@@ -1,9 +1,7 @@
-
 import random
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.conf import settings
-# from accounts.models import EmailOTP
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -51,6 +49,8 @@ def handle_mentions_and_notifications(text, article_obj, sender):
     """
     mention_pattern = r'@([\w\.-]+@[\w\.-]+\.\w+)'
     emails = re.findall(mention_pattern, text)
+
+    print(emails)
     
     for email in emails:
         try:
@@ -66,19 +66,15 @@ def handle_mentions_and_notifications(text, article_obj, sender):
             subject = f"You were tagged in {article_obj.title}"
             body = f"Hello {tagged_user.full_name},\n\nYou were tagged by {sender.full_name} in a comment on '{article_obj.title}'.\n\nComment: {text}"
             email_from = EMAIL_HOST_USER
-            # send_mail(
-            #     subject,
-            #     body,
-            #     settings.DEFAULT_FROM_EMAIL,
-            #     [tagged_user.email],
-            #     fail_silently=True 
-            # )
 
-            send_mail(subject, body, email_from, [email] , fail_silently=True 
-            )
+            send_mail(subject, body, email_from, [email] , fail_silently=True)
             
-        except User.DoesNotExist:
-            continue
+        # except User.DoesNotExist:
+        #     continue
+
+        except Exception as e:
+            print(e)
+
 
 def send_approval_emails(target_role, article):
     """Sends bulk emails when article status changes."""

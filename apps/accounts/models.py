@@ -119,13 +119,13 @@ class RBAC(models.Model):
 
 
 # --- Email OTP ---
-class EmailOTP(models.Model):
-    email = models.EmailField(unique=True)
-    otp = models.CharField(max_length=6)
-    full_name = models.CharField(max_length=255, null=True, blank=True)
-    password = models.CharField(max_length=255, null=True, blank=True)
-    is_verified = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+# class EmailOTP(models.Model):
+#     email = models.EmailField(unique=True)
+#     otp = models.CharField(max_length=6)
+#     full_name = models.CharField(max_length=255, null=True, blank=True)
+#     password = models.CharField(max_length=255, null=True, blank=True)
+#     is_verified = models.BooleanField(default=False)
+#     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        app_label = 'accounts'
+#     class Meta:
+#         app_label = 'accounts'

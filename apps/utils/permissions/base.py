@@ -8,7 +8,8 @@ class HasRBACPermission(permissions.BasePermission):
             return False
             
         # 1. THE FAST-PASS: If they are a system Admin, just let them in.
-        # This removes the need for IsAdminUserRole in your views.
+        # This removes the need for IsAdminUserRole in views.
+        #remove this after frontend config is done 
         if request.user.group == 'admin':
             return True
 
