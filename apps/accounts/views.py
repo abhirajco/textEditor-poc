@@ -9,6 +9,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User, RBAC
 from utils.permissions.base import *
 from utils.notifications.services import send_otp_via_email 
+from rest_framework.permissions import IsAuthenticated
 
 
 class SignupView(APIView):
@@ -260,5 +261,22 @@ class AdminUserRBACListView(APIView):
     
             return Response({"count": len(user_list), "users": user_list})
 
+        except Exception as e:
+            return Response({"error": str(e)})
+        
+class logout(APIView):
+    permission_classes= [IsAuthenticated]
+
+    def post(self , request):
+        try:
+            refresh_token= request.data.get("refresh")
+            if not refresh_token:
+                return Response({"error": "No refresh token found"} , status=400)
+            
+            token=RefreshToken(refresh_token)
+            token.blacklist()
+
+            return Response({"message": "successfully logged out"})
+        
         except Exception as e:
             return Response({"error": str(e)})

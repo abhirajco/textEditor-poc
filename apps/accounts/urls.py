@@ -17,4 +17,5 @@ urlpatterns = [
 
     #for refresh token 
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('logout/', logout.as_view())
 ]

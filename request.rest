@@ -161,3 +161,7 @@ Authorization: Bearer {{adminToken}}
 ###
 GET {{baseUrl}}/user-rbac-audit/
 Authorization: Bearer {{adminToken}}
+
+###
+GET {{baseUrl}}/logout/
+Authorization: Bearer {{writerToken}}
