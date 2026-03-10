@@ -10,7 +10,7 @@ from .models import User, RBAC
 from utils.permissions.base import *
 from utils.notifications.services import send_otp_via_email 
 from rest_framework.permissions import IsAuthenticated
-
+from django.db.models import Q
 
 class SignupView(APIView):
    
@@ -282,10 +282,38 @@ class logout(APIView):
         except Exception as e:
             return Response({"error": str(e)})
 
-#for handling @ mentions   
+# #for handling @ mentions   
+# class UserSearchView(APIView):
+#     """
+#     GET /api/accounts/users/search/?q=rob
+#     """
+#     permission_classes = [permissions.IsAuthenticated]
+
+#     def get(self, request):
+#         query = request.query_params.get('q', '').strip()
+
+#         if not query:
+#             return Response([])
+
+#         users = (
+#             User.objects
+#             .filter(full_name__icontains=query)
+#              #.filter(full_name__istartswith=query) --to filter out with starting word
+#             .exclude(id=request.user.id)
+#             .values('id', 'full_name', 'email')[:10]
+#         )
+
+#         return Response(list(users))
+
+
+
 class UserSearchView(APIView):
     """
-    GET /api/accounts/users/search/?q=rob
+    GET /api/accounts/users/search/?q=jo
+    GET /api/accounts/users/search/?q=john+doe   (space encoded as + or %20)
+
+    Returns users where EACH word in the query matches the START
+    of a word in their full name. Case insensitive.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -295,9 +323,14 @@ class UserSearchView(APIView):
         if not query:
             return Response([])
 
+        filters = Q()
+        for word in query.split():
+            # (?i) = case insensitive, (?<!\w) = must be start of a word
+            filters &= Q(full_name__iregex=rf'(?<!\w){word}')
+
         users = (
             User.objects
-            .filter(full_name__icontains=query)
+            .filter(filters)
             .exclude(id=request.user.id)
             .values('id', 'full_name', 'email')[:10]
         )

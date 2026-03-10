@@ -170,3 +170,8 @@ Content-Type: application/json
 {
     "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTc3MzEyNjM3NSwiaWF0IjoxNzczMDM5OTc1LCJqdGkiOiIwZDc1NjQ1Yjc0M2Y0MzM0ODg4NGU5NTUwNmM4OWMzZSIsInVzZXJfaWQiOiIzIn0.nTEdsCHogBkf3K_BmfdhpOQohBKhlLPZsglVT9tEhX8"
 }
+
+###
+
+GET http://localhost:8000/api/accounts/users/search/?q=john+doe
+Authorization: Bearer {{adminToken}}
