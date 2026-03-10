@@ -265,6 +265,7 @@ class AdminUserRBACListView(APIView):
             return Response({"error": str(e)})
         
 class logout(APIView):
+
     permission_classes= [IsAuthenticated]
 
     def post(self , request):
@@ -280,3 +281,25 @@ class logout(APIView):
         
         except Exception as e:
             return Response({"error": str(e)})
+
+#for handling @ mentions   
+class UserSearchView(APIView):
+    """
+    GET /api/accounts/users/search/?q=rob
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        query = request.query_params.get('q', '').strip()
+
+        if not query:
+            return Response([])
+
+        users = (
+            User.objects
+            .filter(full_name__icontains=query)
+            .exclude(id=request.user.id)
+            .values('id', 'full_name', 'email')[:10]
+        )
+
+        return Response(list(users))

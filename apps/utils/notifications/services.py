@@ -45,35 +45,47 @@ def send_otp_via_email(email, pending_data):
 
 def handle_mentions_and_notifications(text, article_obj, sender):
     """
-    Finds @user@company.com in text, increments Redis, and sends an email.
+    Supports two mention formats:
+      1. NEW (dynamic dropdown): @[Full Name](user_id)   ← frontend sends this
+    For every matched user:
+      - Adds them to article_obj.mentions (M2M)
+      - Increments their unread mention counter in Redis
+      - Sends them an email notification
     """
-    mention_pattern = r'@([\w\.-]+@[\w\.-]+\.\w+)'
-    emails = re.findall(mention_pattern, text)
 
-    print(emails)
-    
-    for email in emails:
+    # ── Format 1: @[Robin Hood](3)  (new dynamic format) ──────────────────────
+    dynamic_pattern = r'@\[([^\]]+)\]\((\d+)\)'
+    dynamic_matches = re.findall(dynamic_pattern, text)  # → [("Robin Hood", "3"), ...]
+
+    for full_name, user_id in dynamic_matches:
         try:
-            tagged_user = User.objects.get(email=email)
+            tagged_user = User.objects.get(id=int(user_id))
             article_obj.mentions.add(tagged_user)
-            
-            # 1. Update Redis (Unread UI badge)
+
+            # Increment Redis unread badge counter
             redis_key = f"unread_mentions:{tagged_user.id}"
             cache.get_or_set(redis_key, 0)
             cache.incr(redis_key)
-            
-            # 2. Send Actual Email
-            subject = f"You were tagged in {article_obj.title}"
-            body = f"Hello {tagged_user.full_name},\n\nYou were tagged by {sender.full_name} in a comment on '{article_obj.title}'.\n\nComment: {text}"
-            email_from = EMAIL_HOST_USER
 
-            send_mail(subject, body, email_from, [email] , fail_silently=True)
-            
-        # except User.DoesNotExist:
-        #     continue
+            send_mail(
+                subject    = f"You were mentioned in '{article_obj.title}'",
+                message    = (
+                    f"Hello {tagged_user.full_name},\n\n"
+                    f"{sender.full_name} mentioned you in a comment on '{article_obj.title}'.\n\n"
+                    f"Comment: {text}\n\n"
+                    f"Log in to InSight to view it."
+                ),
+                from_email = EMAIL_HOST_USER,
+                recipient_list = [tagged_user.email],
+                fail_silently  = True,
+            )
 
+            print(f"✅ Mention notification sent to {tagged_user.email} (id={user_id})")
+
+        except User.DoesNotExist:
+            print(f"⚠️  Mention ignored — no user found with id={user_id}")
         except Exception as e:
-            print(e)
+            print(f"❌ Mention error for id={user_id}: {e}")
 
 
 def send_approval_emails(target_role, article):

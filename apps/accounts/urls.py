@@ -17,5 +17,9 @@ urlpatterns = [
 
     #for refresh token 
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('logout/', logout.as_view())
+    path('logout/', logout.as_view()),
+
+    # Dynamic @mention user search — used by frontend dropdown
+    # GET /api/accounts/users/search/?q=rob  →  returns [{id, full_name, email}, ...]
+    path('users/search/', UserSearchView.as_view(), name='user_search'),
 ]
