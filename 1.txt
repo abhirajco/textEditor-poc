@@ -1,5 +1,6 @@
 #admin pswd - 123@#abc
 #uvicorn core.asgi:application --reload  -if you want to run on asgi server
+python -m venv venv
 .\venv\Scripts\activate
 
 python manage.py makemigrations content

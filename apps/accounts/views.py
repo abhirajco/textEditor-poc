@@ -80,12 +80,12 @@ class LoginView(APIView):
         user = User.objects.filter(email=email).first()
 
         if not user:
-            return Response({"no user with the given password found , pls signup"})
+            return Response({"No user with the given email found , please signup"} , status=401)
         
         ##print(user.password)
 
         if not check_password(password, user.password):
-            return Response({"wrong passwrod"})
+            return Response({"wrong passwrod"}, status=401)
         
         
         if user and check_password(password, user.password):
