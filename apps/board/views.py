@@ -4,7 +4,6 @@ from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
-
 from accounts.models import User
 from utils.permissions.base import HasRBACPermission
 from utils.notifications.services import send_task_assignment_email, send_task_transfer_email
@@ -27,8 +26,8 @@ class TaskListView(APIView):
     #POST — create a new task and assign it to any user nyone with board access can do this.
 
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
+    required_area = 'board'
+    required_roles = ['read', 'write', 'update', 'admin']
 
     def get(self, request):
         # Try Redis first
@@ -89,7 +88,7 @@ class TaskListView(APIView):
 
 class TaskDetailView(APIView):
     """
-    GET    — full task detail including discussion and history.
+    GET — full task detail including discussion and history.
     PATCH  — update stage only (to_do / in_progress / completed).
              Only the current assignee can change the stage.
     DELETE — only the original creator (assigned_by) or admin can delete.
@@ -173,8 +172,8 @@ class TransferTaskView(APIView):
     Records the transfer in TaskHistory and updates last_transferred_by.
     """
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['write', 'update', 'admin']
+    required_area = 'board'
+    required_roles = ['write', 'update', 'admin']
 
     def post(self, request, task_id):
         try:
@@ -266,7 +265,7 @@ class TasksByUserView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=404)
 
-        tasks      = Task.objects.filter(assigned_to=target_user).select_related('assigned_by', 'assigned_to')
+        tasks = Task.objects.filter(assigned_to=target_user).select_related('assigned_by', 'assigned_to')
         serializer = TaskListSerializer(tasks, many=True)
         return Response({
             "user":  {"id": target_user.id, "full_name": target_user.full_name, "email": target_user.email},
@@ -288,7 +287,7 @@ class TasksByStageView(APIView):
         if stage not in valid_stages:
             return Response({"error": f"Invalid stage. Choose from: {valid_stages}"}, status=400)
 
-        tasks      = Task.objects.filter(stage=stage).select_related('assigned_by', 'assigned_to')
+        tasks = Task.objects.filter(stage=stage).select_related('assigned_by', 'assigned_to')
         serializer = TaskListSerializer(tasks, many=True)
         return Response(serializer.data)
 

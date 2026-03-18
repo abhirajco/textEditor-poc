@@ -3,11 +3,11 @@ from .models import Task, TaskHistory, Discussion
 
 
 class DiscussionSerializer(serializers.ModelSerializer):
-    author_name  =serializers.CharField(source='author.full_name', read_only=True)
+    author_name =serializers.CharField(source='author.full_name', read_only=True)
     author_email = serializers.CharField(source='author.email',read_only=True)
 
     class Meta:
-        model  = Discussion
+        model = Discussion
         fields = ['id', 'author_name', 'author_email', 'message', 'created_at']
 
 
@@ -15,7 +15,7 @@ class TaskHistorySerializer(serializers.ModelSerializer):
     performed_by_name = serializers.CharField(source='performed_by.full_name', read_only=True)
 
     class Meta:
-        model  =TaskHistory
+        model =TaskHistory
         fields =['id', 'action', 'performed_by_name', 'detail', 'timestamp']
 
 

@@ -26,7 +26,7 @@ class SignupView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email     = request.data.get('email', '').strip()
+        email = request.data.get('email', '').strip()
         full_name = request.data.get('full_name', '').strip()
         password  = request.data.get('password', '')
 
@@ -36,7 +36,7 @@ class SignupView(APIView):
         if User.objects.filter(email=email).exists():
             return Response({"error": "A user with this email already exists."}, status=400)
 
-        hashed_pw    = make_password(password)
+        hashed_pw = make_password(password)
         pending_data = {"email": email, "full_name": full_name, "password": hashed_pw}
 
         try:
@@ -56,10 +56,10 @@ class VerifyOTPView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email        = request.data.get('email', '').strip()
+        email = request.data.get('email', '').strip()
         otp_provided = request.data.get('otp', '').strip()
 
-        cache_key   = f"otp_auth_{email}"
+        cache_key= f"otp_auth_{email}"
         cached_data = cache.get(cache_key)
 
         if not cached_data:
@@ -69,11 +69,11 @@ class VerifyOTPView(APIView):
             return Response({"error": "Invalid OTP."}, status=400)
 
         User.objects.create(
-            email     = email,
+            email = email,
             full_name = cached_data["full_name"],
-            password  = cached_data["password"],
-            group     = 'user',
-            role      = 'none',
+            password = cached_data["password"],
+            group = 'user',
+            role = 'none',
             is_active = True,
         )
 
@@ -86,7 +86,7 @@ class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email    = request.data.get('email', '').strip()
+        email = request.data.get('email', '').strip()
         password = request.data.get('password', '')
 
         user = User.objects.filter(email=email).first()
@@ -102,11 +102,11 @@ class LoginView(APIView):
             "refresh": str(refresh),
             "access":  str(refresh.access_token),
             "user": {
-                "id":        user.id,
-                "email":     user.email,
+                "id": user.id,
+                "email": user.email,
                 "full_name": user.full_name,
-                "group":     user.group,
-                "role":      user.role,
+                "group": user.group,
+                "role":user.role,
             }
         })
 
@@ -140,11 +140,11 @@ class ViewAllUsers(APIView):
         users = User.objects.all().order_by('-date_joined')
         data  = [
             {
-                "id":        u.id,
+                "id": u.id,
                 "full_name": u.full_name,
-                "email":     u.email,
-                "group":     u.group,
-                "role":      u.role,
+                "email": u.email,
+                "group": u.group,
+                "role": u.role,
                 "is_active": u.is_active,
             }
             for u in users
@@ -175,29 +175,29 @@ class AssignRole(APIView):
 
     def post(self, request, user_id):
         new_group = request.data.get('group', '').lower().strip()
-        new_role  = request.data.get('role',  'none').lower().strip()
+        new_role = request.data.get('role',  'none').lower().strip()
 
         valid_groups = [c[0] for c in User.GROUP_CHOICES]
-        valid_roles  = [c[0] for c in User.ROLE_CHOICES]
+        valid_roles = [c[0] for c in User.ROLE_CHOICES]
 
         if new_group not in valid_groups or new_role not in valid_roles:
             return Response({"error": f"Invalid group or role."}, status=400)
 
         try:
             with transaction.atomic():
-                user       = User.objects.get(id=user_id)
+                user = User.objects.get(id=user_id)
                 user.group = new_group
-                user.role  = new_role
+                user.role = new_role
 
                 if new_group == 'admin':
-                    user.is_staff     = True
+                    user.is_staff = True
                     user.is_superuser = True
 
                 user.save()
 
                 # Sync Django Group
                 django_group_name = new_group.capitalize()
-                django_group, _   = Group.objects.get_or_create(name=django_group_name)
+                django_group, _ = Group.objects.get_or_create(name=django_group_name)
                 user.groups.clear()
                 user.groups.add(django_group)
 
@@ -215,11 +215,11 @@ class AssignRole(APIView):
         """
         Wipe and rebuild RBAC rules.
 
-        Admin        → admin action on ALL areas (content + board + users + reports + settings)
-        Executive    → content: read + feedback + promote  |  board: read + write + update
-        Internal     → depends on role:
-            writer   → content: write + update  |  board: read + write + update
-            reviewer → content: update + feedback + promote  |  board: read + write + update
+        Admin→ admin action on ALL areas (content + board + users + reports + settings)
+        Executive→ content: read + feedback + promote  |  board: read + write + update
+        Internal → depends on role:
+        writer → content: write + update  |  board: read + write + update
+        eviewer → content: update + feedback + promote  |  board: read + write + update
         External/SME → content: update + feedback + promote  (no board access)
         """
         RBAC.objects.filter(application_group=django_group).delete()
@@ -295,11 +295,11 @@ class AdminUserRBACListView(APIView):
                 ).values('application_area', 'application_action')
 
                 user_list.append({
-                    'id':          user.id,
-                    'full_name':   user.full_name,
-                    'email':       user.email,
-                    'group':       user.group,
-                    'role':        user.role,
+                    'id':user.id,
+                    'full_name': user.full_name,
+                    'email': user.email,
+                    'group': user.group,
+                    'role': user.role,
                     'permissions': list(actions),
                 })
 

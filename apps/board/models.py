@@ -13,14 +13,14 @@ class Task(models.Model):
     """
 
     STAGE_CHOICES = [
-        ('to_do',       'To Do'),
+        ('to_do','To Do'),
         ('in_progress', 'In Progress'),
-        ('completed',   'Completed'),
+        ('completed', 'Completed'),
     ]
 
-    title       = models.CharField(max_length=255)
+    title= models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    stage       = models.CharField(max_length=20, choices=STAGE_CHOICES, default='to_do')
+    stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='to_do')
 
     # Who originally created and assigned this task — never changes
     assigned_by = models.ForeignKey(
@@ -64,7 +64,7 @@ class TaskHistory(models.Model):
     Written automatically by the views — never edited.
     """
     ACTION_CHOICES = [
-        ('created',    'Created'),
+        ('created','Created'),
         ('transferred','Transferred'),
         ('stage_changed', 'Stage Changed'),
     ]

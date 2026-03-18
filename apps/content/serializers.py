@@ -3,12 +3,12 @@ from .models import Article
 
 
 class ArticleSerializer(serializers.ModelSerializer):
-    author_name    = serializers.CharField(source='author.full_name',    read_only=True)
+    author_name = serializers.CharField(source='author.full_name',    read_only=True)
     locked_by_name = serializers.CharField(source='locked_by.full_name', read_only=True, default="None")
-    image_url      = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
-        model  = Article
+        model = Article
         fields = [
             'id', 'title', 'content', 'status',
             'author_name', 'image_url', 'locked_by_name',
