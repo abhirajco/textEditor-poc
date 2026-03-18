@@ -1,0 +1,354 @@
+# ============================================================
+#  Merged Platform — REST Client
+#  VS Code REST Client extension required
+#  All seeded passwords: Pass123!
+# ============================================================
+
+@base     = http://127.0.0.1:8000/api
+@password = Pass123!
+
+
+# ============================================================
+#  1. AUTH FLOW
+# ============================================================
+
+### 1a. Signup (sends OTP to email)
+POST {{base}}/accounts/signup/
+Content-Type: application/json
+
+{
+  "email":     "newuser@example.com",
+  "full_name": "New User",
+  "password":  "Pass123!"
+}
+
+### 1b. Verify OTP (check terminal for code, completes registration)
+POST {{base}}/accounts/verify-otp/
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "otp":   "123456"
+}
+
+### 1c. Login as Admin
+# @name adminLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "admin@platform.com",
+  "password": "{{password}}"
+}
+
+@adminToken = {{adminLogin.response.body.access}}
+@adminRefresh = {{adminLogin.response.body.refresh}}
+
+### 1d. Login as Executive
+# @name execLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "exec@platform.com",
+  "password": "{{password}}"
+}
+
+@execToken = {{execLogin.response.body.access}}
+
+### 1e. Login as Writer
+# @name writerLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "writer@platform.com",
+  "password": "{{password}}"
+}
+
+@writerToken = {{writerLogin.response.body.access}}
+
+### 1f. Login as Reviewer
+# @name reviewerLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "reviewer@platform.com",
+  "password": "{{password}}"
+}
+
+@reviewerToken = {{reviewerLogin.response.body.access}}
+
+### 1g. Login as SME
+# @name smeLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "sme@platform.com",
+  "password": "{{password}}"
+}
+
+@smeToken = {{smeLogin.response.body.access}}
+
+### 1h. Logout
+POST {{base}}/accounts/logout/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "refresh": "PASTE_REFRESH_TOKEN_HERE"
+}
+
+### 1i. Refresh access token
+POST {{base}}/accounts/token/refresh/
+Content-Type: application/json
+
+{
+  "refresh": "PASTE_REFRESH_TOKEN_HERE"
+}
+
+
+# ============================================================
+#  2. ADMIN — USER MANAGEMENT
+# ============================================================
+
+### 2a. View all users
+GET {{base}}/accounts/users/all/
+Authorization: Bearer {{adminToken}}
+
+### 2b. View pending users (role = none, need assignment)
+GET {{base}}/accounts/users/pending/
+Authorization: Bearer {{adminToken}}
+
+### 2c. Assign group + role to a user
+# group choices: admin | executive | internal | external | user
+# role choices:  admin | exec_approver | executive | writer | reviewer | sme | none
+POST {{base}}/accounts/users/assign/2/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "group": "internal",
+  "role":  "writer"
+}
+
+### 2d. Delete a user
+DELETE {{base}}/accounts/users/delete/5/
+Authorization: Bearer {{adminToken}}
+
+### 2e. RBAC audit — see all users and their permission matrix
+GET {{base}}/accounts/users/rbac-audit/
+Authorization: Bearer {{adminToken}}
+
+### 2f. @Mention user search (used by frontend dropdown for both article comments and task discussion)
+# Returns users whose name starts with the query word
+GET {{base}}/accounts/users/search/?q=ali
+Authorization: Bearer {{writerToken}}
+
+### 2g. Search with multiple words
+GET {{base}}/accounts/users/search/?q=alice+w
+Authorization: Bearer {{writerToken}}
+
+
+# ============================================================
+#  3. INSIGHT — CONTENT MANAGEMENT
+# ============================================================
+
+@articleId = 1
+
+### 3a. View active (unpublished) articles
+GET {{base}}/content/articles/active/
+Authorization: Bearer {{writerToken}}
+
+### 3b. View published articles
+GET {{base}}/content/articles/published/
+Authorization: Bearer {{reviewerToken}}
+
+### 3c. Create a new draft (Writer only)
+POST {{base}}/content/articles/create/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "title":   "My First Draft",
+  "content": "This is the article body content."
+}
+
+### 3d. View article detail
+GET {{base}}/content/articles/{{articleId}}/
+Authorization: Bearer {{writerToken}}
+
+### 3e. Lock article for editing (must lock before editing)
+POST {{base}}/content/articles/{{articleId}}/lock/
+Authorization: Bearer {{writerToken}}
+
+### 3f. Unlock article
+DELETE {{base}}/content/articles/{{articleId}}/lock/
+Authorization: Bearer {{writerToken}}
+
+### 3g. Edit article (must hold lock first)
+PUT {{base}}/content/articles/{{articleId}}/edit/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "title":   "Updated Title",
+  "content": "Updated article body with new content."
+}
+
+### 3h. Assign SME to article (Reviewer only)
+POST {{base}}/content/articles/{{articleId}}/assign-sme/
+Authorization: Bearer {{reviewerToken}}
+Content-Type: application/json
+
+{
+  "sme_id": 5
+}
+
+### 3i. Approve article — moves through workflow stages
+# Draft → pending_executive (Reviewer or assigned SME)
+# pending_executive → pending_admin (Executive)
+# pending_admin → published (Admin)
+POST {{base}}/content/articles/{{articleId}}/approve/
+Authorization: Bearer {{reviewerToken}}
+
+### 3j. Post a comment (kicks article back to Draft status)
+# Supports @[Full Name](user_id) mention format
+POST {{base}}/content/articles/{{articleId}}/comment/
+Authorization: Bearer {{reviewerToken}}
+Content-Type: application/json
+
+{
+  "comment_text": "Please revise the introduction. @[Alice Writer](3) see section 2."
+}
+
+### 3k. View all comments on article
+GET {{base}}/content/articles/{{articleId}}/comments/
+Authorization: Bearer {{reviewerToken}}
+
+### 3l. View version history
+GET {{base}}/content/articles/{{articleId}}/history/
+Authorization: Bearer {{adminToken}}
+
+### 3m. Edit a comment (author only)
+PATCH {{base}}/content/comments/edit/1/
+Authorization: Bearer {{reviewerToken}}
+Content-Type: application/json
+
+{
+  "comment_text": "Updated comment text."
+}
+
+### 3n. Delete a comment (author only)
+DELETE {{base}}/content/comments/edit/1/
+Authorization: Bearer {{reviewerToken}}
+
+
+# ============================================================
+#  4. KANBAN — BOARD
+# ============================================================
+
+@taskId = 1
+
+### 4a. List ALL tasks (Redis-cached 5 min)
+GET {{base}}/board/tasks/
+Authorization: Bearer {{writerToken}}
+
+### 4b. Create a task and assign it to a user
+POST {{base}}/board/tasks/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "title":       "Write homepage copy",
+  "description": "Draft compelling copy for the new landing page.",
+  "assigned_to": 3
+}
+
+### 4c. Get full task detail (includes discussion + history)
+GET {{base}}/board/tasks/{{taskId}}/
+Authorization: Bearer {{writerToken}}
+
+### 4d. Update task stage (current assignee or admin only)
+# stage options: to_do | in_progress | completed
+PATCH {{base}}/board/tasks/{{taskId}}/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "stage": "in_progress"
+}
+
+### 4e. Delete a task (original creator or admin only)
+DELETE {{base}}/board/tasks/{{taskId}}/
+Authorization: Bearer {{adminToken}}
+
+### 4f. Transfer task to another user (current assignee or admin only)
+POST {{base}}/board/tasks/{{taskId}}/transfer/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "transfer_to": 4
+}
+
+### 4g. My tasks (assigned to me)
+GET {{base}}/board/tasks/mine/
+Authorization: Bearer {{writerToken}}
+
+### 4h. Tasks assigned to a specific user
+GET {{base}}/board/tasks/user/3/
+Authorization: Bearer {{adminToken}}
+
+### 4i. Tasks filtered by stage
+GET {{base}}/board/tasks/stage/to_do/
+Authorization: Bearer {{writerToken}}
+
+GET {{base}}/board/tasks/stage/in_progress/
+Authorization: Bearer {{writerToken}}
+
+GET {{base}}/board/tasks/stage/completed/
+Authorization: Bearer {{writerToken}}
+
+
+# ============================================================
+#  5. KANBAN — DISCUSSION (task comments)
+# ============================================================
+
+### 5a. Get all comments on a task
+GET {{base}}/board/tasks/{{taskId}}/discussion/
+Authorization: Bearer {{writerToken}}
+
+### 5b. Post a comment on a task
+# Supports @[Full Name](user_id) mention format (same as article comments)
+POST {{base}}/board/tasks/{{taskId}}/discussion/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "message": "Should be done by Friday. @[Bob Reviewer](4) can you check this?"
+}
+
+### 5c. Delete a comment (author or admin only)
+DELETE {{base}}/board/tasks/{{taskId}}/discussion/1/delete/
+Authorization: Bearer {{adminToken}}
+
+
+
+###
+POST /api/content/articles/save/
+{
+  "title":   "My new article",
+  "content": "Content so far..."
+}
+
+
+###
+POST /api/content/articles/save/
+{
+  "article_id": 6,
+  "title":      "My new article",
+  "content":    "More content added..."
+}
