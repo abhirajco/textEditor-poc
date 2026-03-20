@@ -3,6 +3,10 @@
 python -m venv venv
 .\venv\Scripts\activate
 
+
+pip install -r requirements.txt
+pip freeze > requirements.txt
+
 python manage.py makemigrations content
 python manage.py migrate
 
@@ -22,7 +26,7 @@ git push origin feature/rbac-update
 
 
 
-pip install -r requirements.txt
+
 
 
 #content publishing is not working

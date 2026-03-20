@@ -12,12 +12,23 @@ from rest_framework.permissions import IsAuthenticated
 from .models import User, RBAC
 from utils.permissions.base import HasRBACPermission
 from utils.notifications.services import send_otp_via_email
-
-
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, inline_serializer
+from drf_spectacular.types import OpenApiTypes
+from rest_framework import serializers as drf_serializers
 # ==============================================================================
 # AUTH VIEWS
 # ==============================================================================
-
+@extend_schema(
+    tags=['Auth'],
+    request=inline_serializer(
+        name='SignupRequest',
+        fields={
+            'email': drf_serializers.EmailField(),
+            'full_name': drf_serializers.CharField(),
+            'password': drf_serializers.CharField(),
+        }
+    )
+)
 class SignupView(APIView):
     """
     Step 1: User provides email + full_name + password.
@@ -47,6 +58,16 @@ class SignupView(APIView):
         return Response({"message": "OTP sent! Please verify to complete registration."}, status=200)
 
 
+@extend_schema(
+    tags=['Auth'],
+    request=inline_serializer(
+        name='VerifyOTPRequest',
+        fields={
+            'email': drf_serializers.EmailField(),
+            'otp':   drf_serializers.CharField(),
+        }
+    )
+)
 class VerifyOTPView(APIView):
     """
     Step 2: User submits the OTP.
@@ -81,6 +102,16 @@ class VerifyOTPView(APIView):
         return Response({"message": "Account created successfully. You can now login."}, status=201)
 
 
+@extend_schema(
+    tags=['Auth'],
+    request=inline_serializer(
+        name='LoginRequest',
+        fields={
+            'email':    drf_serializers.EmailField(),
+            'password': drf_serializers.CharField(),
+        }
+    )
+)
 class LoginView(APIView):
     """Returns JWT access + refresh tokens on valid credentials."""
     permission_classes = [permissions.AllowAny]
@@ -111,6 +142,15 @@ class LoginView(APIView):
         })
 
 
+@extend_schema(
+    tags=['Auth'],
+    request=inline_serializer(
+        name='LogoutRequest',
+        fields={
+            'refresh': drf_serializers.CharField(help_text='Refresh token to blacklist'),
+        }
+    )
+)
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -129,7 +169,7 @@ class LogoutView(APIView):
 # ==============================================================================
 # ADMIN — USER MANAGEMENT VIEWS
 # ==============================================================================
-
+@extend_schema(tags=['Users'])
 class ViewAllUsers(APIView):
     """Returns every user in the system. Admin only."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
@@ -152,6 +192,7 @@ class ViewAllUsers(APIView):
         return Response(data)
 
 
+@extend_schema(tags=['Users'])
 class PeopleWithoutRole(APIView):
     """Returns users who registered but haven't been assigned a role yet."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
@@ -164,6 +205,22 @@ class PeopleWithoutRole(APIView):
         return Response(data)
 
 
+@extend_schema(
+    tags=['Users'],
+    request=inline_serializer(
+        name='AssignRoleRequest',
+        fields={
+            'group': drf_serializers.ChoiceField(
+                choices=['admin', 'executive', 'internal', 'external', 'user'],
+                help_text='Organisational group for the user',
+            ),
+            'role': drf_serializers.ChoiceField(
+                choices=['admin', 'exec_approver', 'executive', 'writer', 'reviewer', 'sme', 'none'],
+                help_text='Specific role within the group',
+            ),
+        }
+    )
+)
 class AssignRole(APIView):
     """
     Admin assigns group + role to a user, syncs Django Group, and rebuilds the
@@ -259,6 +316,7 @@ class AssignRole(APIView):
                 RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
 
 
+@extend_schema(tags=['Users'])
 class DeleteUser(APIView):
     """Permanently deletes a user. Admin only."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
@@ -280,6 +338,7 @@ class DeleteUser(APIView):
             return Response({"error": "User not found."}, status=404)
 
 
+@extend_schema(tags=['Users'])
 class AdminUserRBACListView(APIView):
     """Returns every user with their full RBAC permissions. Admin only."""
     permission_classes = [HasRBACPermission]
@@ -313,6 +372,18 @@ class AdminUserRBACListView(APIView):
 # @MENTION USER SEARCH
 # ==============================================================================
 
+@extend_schema(
+    tags=['Users'],
+    parameters=[
+        OpenApiParameter(
+            name='q',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Search users by name (word-boundary match). Used for @mention dropdown.',
+            required=False,
+        ),
+    ]
+)
 class UserSearchView(APIView):
     """
     GET /api/accounts/users/search/?q=jo

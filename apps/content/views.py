@@ -12,9 +12,13 @@ from .serializers import ArticleSerializer
 # Custom RBAC Import
 from utils.permissions.base import HasRBACPermission 
 from django.db.models import OuterRef, Subquery
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, inline_serializer
+from drf_spectacular.types import OpenApiTypes
+from rest_framework import serializers as drf_serializers
 
 # --- 1. LIST VIEWS ---
 #non published articles
+@extend_schema(tags=['Content'])
 class ActiveArticleListView(APIView):
     
     permission_classes = [HasRBACPermission]
@@ -38,6 +42,7 @@ class ActiveArticleListView(APIView):
         return Response(serializer.data)
 
 #2 published article
+@extend_schema(tags=['Content'])
 class PublishedArticleListView(APIView):
    
     permission_classes = [HasRBACPermission]
@@ -61,6 +66,17 @@ class PublishedArticleListView(APIView):
 
 
 # --- 3. for commenting ---
+@extend_schema(
+    tags=['Content'],
+    request=inline_serializer(
+        name='WriteCommentRequest',
+        fields={
+            'comment_text': drf_serializers.CharField(
+                help_text='Comment text. Supports @[Full Name](user_id) mention format.'
+            ),
+        }
+    )
+)
 class WriteComment(APIView):
     #Add feedback, trigger @mention emails
     permission_classes = [HasRBACPermission]
@@ -113,6 +129,17 @@ class WriteComment(APIView):
 
 
 #4 article writing
+@extend_schema(
+    tags=['Content'],
+    request=inline_serializer(
+        name='ArticleCreateRequest',
+        fields={
+            'title':   drf_serializers.CharField(),
+            'content': drf_serializers.CharField(),
+            'image':   drf_serializers.ImageField(required=False),
+        }
+    )
+)
 class ArticleCreate(APIView):
     
     permission_classes = [HasRBACPermission]
@@ -153,6 +180,7 @@ class ArticleCreate(APIView):
 
 
 #5 - when a version is clicked then all the details will be shown
+@extend_schema(tags=['Content'])
 class ArticleDetailView(APIView):
    
     permission_classes = [HasRBACPermission]
@@ -177,7 +205,9 @@ class ArticleDetailView(APIView):
         except Article.DoesNotExist:
             return Response({"error": "Article not found"}, status=404)
 
+
 #6
+@extend_schema(tags=['Content'])
 class ArticleLock(APIView):
    
     permission_classes = [HasRBACPermission]
@@ -218,6 +248,15 @@ class ArticleLock(APIView):
 
 
 #7
+@extend_schema(
+    tags=['Content'],
+    request=inline_serializer(
+        name='AssignSMERequest',
+        fields={
+            'sme_id': drf_serializers.IntegerField(help_text='ID of the SME user to assign'),
+        }
+    )
+)
 class AssignSMEView(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
@@ -249,7 +288,9 @@ class AssignSMEView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=400)
 
+
 #8
+@extend_schema(tags=['Content'])
 class ApproveArticle(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
@@ -311,7 +352,19 @@ class ApproveArticle(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=400)
 
+
 #9
+@extend_schema(
+    tags=['Content'],
+    request=inline_serializer(
+        name='ArticleEditRequest',
+        fields={
+            'title':   drf_serializers.CharField(),
+            'content': drf_serializers.CharField(),
+            'image':   drf_serializers.ImageField(required=False),
+        }
+    )
+)
 class ArticleEdit(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
@@ -390,7 +443,9 @@ class ArticleEdit(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+
 #10
+@extend_schema(tags=['Content'])
 class ArticleVersionHistory(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
@@ -438,7 +493,9 @@ class ArticleVersionHistory(APIView):
         except Article.DoesNotExist:
             return Response({"error": "Article not found."}, status=404)
 
+
 #11
+@extend_schema(tags=['Content'])
 class ArticleCommentHistoryView(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
@@ -490,7 +547,17 @@ class ArticleCommentHistoryView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+
 #12
+@extend_schema(
+    tags=['Content'],
+    request=inline_serializer(
+        name='CommentEditRequest',
+        fields={
+            'comment_text': drf_serializers.CharField(),
+        }
+    )
+)
 class CommentEditDelete(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
@@ -535,8 +602,22 @@ class CommentEditDelete(APIView):
 
         except ArticleComment.DoesNotExist:
             return Response({"error": "Comment not found."}, status=404)
-       
 
+
+@extend_schema(
+    tags=['Content'],
+    request=inline_serializer(
+        name='SaveVersionRequest',
+        fields={
+            'title':      drf_serializers.CharField(),
+            'content':    drf_serializers.CharField(),
+            'article_id': drf_serializers.IntegerField(
+                required=False,
+                help_text='Leave empty for fresh content. Send existing article ID when editing.'
+            ),
+        }
+    )
+)
 class SaveVersionView(APIView):
     """
     POST /api/content/articles/save/
@@ -632,6 +713,7 @@ class SaveVersionView(APIView):
             return Response({"error": str(e)}, status=500)
 
 
+@extend_schema(tags=['Content'])
 class LatestVersionView(APIView):
     """
     GET /api/content/articles/<pk>/latest-version/

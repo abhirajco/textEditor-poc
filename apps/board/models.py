@@ -3,42 +3,57 @@ from django.conf import settings
 
 
 class Task(models.Model):
-    """
-    The core Kanban card.
-    - Anyone (any role) can create and assign a task to anyone.
-    - The current assignee can transfer it to someone else.
-    - Three stages: to_do → in_progress → completed.
-    - Full audit trail: assigned_by is always the original creator,
-      assigned_to is the current holder, last_transferred_by shows who moved it last.
-    """
 
-    STAGE_CHOICES = [
-        ('to_do','To Do'),
+    STATUS_CHOICES = [
+        ('to_do', 'To Do'),
         ('in_progress', 'In Progress'),
-        ('completed', 'Completed'),
+        ('completed',   'Completed'),
+        ('blocked',     'Blocked'),
+        ('approved',    'Approved'),
     ]
 
-    title= models.CharField(max_length=255)
-    description = models.TextField(blank=True)
-    stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='to_do')
+    PRIORITY_CHOICES = [
+        ('low',    'Low'),
+        ('medium', 'Medium'),
+        ('high',   'High'),
+    ]
 
-    # Who originally created and assigned this task — never changes
+    title  = models.CharField(max_length=255)
+    description= models.TextField(blank=True)
+    tags=models.CharField(
+            max_length=500, 
+            blank=True, default='',
+            help_text="Comma-separated tags e.g. design,ux,launch"
+    )
+
+    priority= models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
+    marketing_type = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text="e.g. Social Media, Blog, Email Campaign"
+    )
+
+    due_date = models.DateField(null=True, blank=True)
+
+    # renamed from stage to status (but keeping DB column same via db_column)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='to_do',
+        db_index=True,
+    )
+
     assigned_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         related_name='tasks_created',
     )
-
-    # Who currently holds this task — changes on transfer
     assigned_to = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         related_name='tasks_assigned',
     )
-
-    # Who performed the last transfer (null if task was never transferred)
     last_transferred_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -53,9 +68,22 @@ class Task(models.Model):
     class Meta:
         app_label = 'board'
         ordering  = ['-created_at']
+        indexes   = [
+            models.Index(fields=['status']),
+            models.Index(fields=['priority']),
+            models.Index(fields=['due_date']),
+            models.Index(fields=['assigned_to', 'status']),
+        ]
+
+    def get_tags_list(self):
+        """Returns tags as a Python list."""
+        if not self.tags:
+            return []
+        return [t.strip() for t in self.tags.split(',') if t.strip()]
 
     def __str__(self):
-        return f"[{self.stage}] {self.title} → {self.assigned_to}"
+        return f"[{self.status}] {self.title} → {self.assigned_to}"
+
 
 
 class TaskHistory(models.Model):
@@ -63,10 +91,12 @@ class TaskHistory(models.Model):
     Immutable audit log for every stage change and transfer.
     Written automatically by the views — never edited.
     """
+
     ACTION_CHOICES = [
-        ('created','Created'),
-        ('transferred','Transferred'),
+        ('created',       'Created'),
+        ('transferred',   'Transferred'),
         ('stage_changed', 'Stage Changed'),
+        ('updated',       'Updated'),       # ← add this line
     ]
 
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='history')

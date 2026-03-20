@@ -45,6 +45,7 @@ INSTALLED_APPS = [
 
     # Third Party
     'rest_framework',
+    'drf_spectacular',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
@@ -125,6 +126,38 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',  # ← add inside existing dict
+}
+
+
+
+SPECTACULAR_SETTINGS = {
+    'TITLE':       'Merged Platform API',
+    'DESCRIPTION': (
+        'Backend API for InSight (content management + approval workflow) '
+        'and Kanban Board. Built with Django REST Framework, PostgreSQL, Redis, and Docker.'
+    ),
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+
+    # Group endpoints by app
+    'TAGS': [
+        {'name': 'Auth',     'description': 'Signup, OTP verify, login, logout, token refresh'},
+        {'name': 'Users',    'description': 'User management and RBAC (admin only)'},
+        {'name': 'Content',  'description': 'InSight — articles, versions, approval workflow'},
+        {'name': 'Board',    'description': 'Kanban board — tasks, transfer, discussion, filters'},
+    ],
+
+    'SECURITY': [{'BearerAuth': []}],
+    'COMPONENTS': {
+        'securitySchemes': {
+            'BearerAuth': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT',
+            }
+        }
+    },
 }
 
 SIMPLE_JWT = {

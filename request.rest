@@ -41,6 +41,7 @@ Content-Type: application/json
   "password": "{{password}}"
 }
 
+###
 @adminToken = {{adminLogin.response.body.access}}
 @adminRefresh = {{adminLogin.response.body.refresh}}
 
@@ -66,6 +67,7 @@ Content-Type: application/json
   "password": "{{password}}"
 }
 
+###
 @writerToken = {{writerLogin.response.body.access}}
 
 ### 1f. Login as Reviewer
@@ -78,6 +80,7 @@ Content-Type: application/json
   "password": "{{password}}"
 }
 
+###
 @reviewerToken = {{reviewerLogin.response.body.access}}
 
 ### 1g. Login as SME
@@ -90,6 +93,8 @@ Content-Type: application/json
   "password": "{{password}}"
 }
 
+
+###
 @smeToken = {{smeLogin.response.body.access}}
 
 ### 1h. Logout
@@ -148,7 +153,7 @@ GET {{base}}/accounts/users/search/?q=ali
 Authorization: Bearer {{writerToken}}
 
 ### 2g. Search with multiple words
-GET {{base}}/accounts/users/search/?q=alice+w
+GET {{base}}/accounts/users/search/?q=b
 Authorization: Bearer {{writerToken}}
 
 
@@ -232,7 +237,7 @@ Authorization: Bearer {{reviewerToken}}
 GET {{base}}/content/articles/{{articleId}}/history/
 Authorization: Bearer {{adminToken}}
 
-### 3m. Edit a comment (author only)
+### 3m. Edit a comment ( comment author only)
 PATCH {{base}}/content/comments/edit/1/
 Authorization: Bearer {{reviewerToken}}
 Content-Type: application/json
@@ -245,110 +250,169 @@ Content-Type: application/json
 DELETE {{base}}/content/comments/edit/1/
 Authorization: Bearer {{reviewerToken}}
 
-
 # ============================================================
-#  4. KANBAN — BOARD
+# KANBAN BOARD — NEW ENDPOINTS (tags, priority, marketing_type, due_date)
 # ============================================================
 
-@taskId = 1
-
-### 4a. List ALL tasks (Redis-cached 5 min)
-GET {{base}}/board/tasks/
-Authorization: Bearer {{writerToken}}
-
-### 4b. Create a task and assign it to a user
+### Create task with all new fields
 POST {{base}}/board/tasks/
 Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 
 {
-  "title":       "Write homepage copy",
-  "description": "Draft compelling copy for the new landing page.",
-  "assigned_to": 3
+  "title":          "Design social media campaign",
+  "description":    "Create assets for Q2 launch campaign across all platforms.",
+  "assigned_to":    3,
+  "tags":           "design,social,q2,launch",
+  "priority":       "high",
+  "marketing_type": "Social Media",
+  "due_date":       "2026-04-15"
 }
 
-### 4c. Get full task detail (includes discussion + history)
-GET {{base}}/board/tasks/{{taskId}}/
-Authorization: Bearer {{writerToken}}
-
-### 4d. Update task stage (current assignee or admin only)
-# stage options: to_do | in_progress | completed
-PATCH {{base}}/board/tasks/{{taskId}}/
+### Update task metadata (tags, priority, marketing_type, due_date)
+# Only task creator, last transferrer, or admin can do this
+PATCH {{base}}/board/tasks/1/update/
 Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 
 {
-  "stage": "in_progress"
+  "tags":           "design,social,q2,revised",
+  "priority":       "medium",
+  "marketing_type": "Email Campaign",
+  "due_date":       "2026-04-20"
 }
 
-### 4e. Delete a task (original creator or admin only)
-DELETE {{base}}/board/tasks/{{taskId}}/
-Authorization: Bearer {{adminToken}}
-
-### 4f. Transfer task to another user (current assignee or admin only)
-POST {{base}}/board/tasks/{{taskId}}/transfer/
+### Update just the title
+PATCH {{base}}/board/tasks/1/update/
 Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 
 {
-  "transfer_to": 4
+  "title": "Updated Campaign Design Task"
 }
 
-### 4g. My tasks (assigned to me)
-GET {{base}}/board/tasks/mine/
-Authorization: Bearer {{writerToken}}
-
-### 4h. Tasks assigned to a specific user
-GET {{base}}/board/tasks/user/3/
-Authorization: Bearer {{adminToken}}
-
-### 4i. Tasks filtered by stage
-GET {{base}}/board/tasks/stage/to_do/
-Authorization: Bearer {{writerToken}}
-
-GET {{base}}/board/tasks/stage/in_progress/
-Authorization: Bearer {{writerToken}}
-
-GET {{base}}/board/tasks/stage/completed/
-Authorization: Bearer {{writerToken}}
-
-
-# ============================================================
-#  5. KANBAN — DISCUSSION (task comments)
-# ============================================================
-
-### 5a. Get all comments on a task
-GET {{base}}/board/tasks/{{taskId}}/discussion/
-Authorization: Bearer {{writerToken}}
-
-### 5b. Post a comment on a task
-# Supports @[Full Name](user_id) mention format (same as article comments)
-POST {{base}}/board/tasks/{{taskId}}/discussion/
+### Update status only (existing endpoint — now supports blocked + approved)
+PATCH {{base}}/board/tasks/1/
 Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 
 {
-  "message": "Should be done by Friday. @[Bob Reviewer](4) can you check this?"
-}
-
-### 5c. Delete a comment (author or admin only)
-DELETE {{base}}/board/tasks/{{taskId}}/discussion/1/delete/
-Authorization: Bearer {{adminToken}}
-
-
-
-###
-POST /api/content/articles/save/
-{
-  "title":   "My new article",
-  "content": "Content so far..."
+  "status": "blocked"
 }
 
 
 ###
-POST /api/content/articles/save/
+PATCH {{base}}/board/tasks/1/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
 {
-  "article_id": 6,
-  "title":      "My new article",
-  "content":    "More content added..."
+  "status": "approved"
 }
+
+# ============================================================
+# BOARD — FILTER & SEARCH
+# ============================================================
+
+### Search by title keyword
+GET {{base}}/board/tasks/filter/?search=campaign
+Authorization: Bearer {{writerToken}}
+
+### Filter by status
+GET {{base}}/board/tasks/filter/?status=blocked
+Authorization: Bearer {{writerToken}}
+
+### Filter by priority
+GET {{base}}/board/tasks/filter/?priority=high
+Authorization: Bearer {{writerToken}}
+
+### Filter by marketing type
+GET {{base}}/board/tasks/filter/?marketing_type=social
+Authorization: Bearer {{writerToken}}
+
+### Filter by assigned user
+GET {{base}}/board/tasks/filter/?assigned_to=3
+Authorization: Bearer {{writerToken}}
+
+### Filter by exact due date
+GET {{base}}/board/tasks/filter/?due_date=2026-04-15
+Authorization: Bearer {{writerToken}}
+
+### Filter tasks due before a date
+GET {{base}}/board/tasks/filter/?due_before=2026-05-01
+Authorization: Bearer {{writerToken}}
+
+### Filter tasks due after a date
+GET {{base}}/board/tasks/filter/?due_after=2026-04-01
+Authorization: Bearer {{writerToken}}
+
+### Filter by tag
+GET {{base}}/board/tasks/filter/?tags=design
+Authorization: Bearer {{writerToken}}
+
+### Combine multiple filters (high priority + not yet done + due soon)
+GET {{base}}/board/tasks/filter/?priority=high&status=in_progress&due_before=2026-05-01
+Authorization: Bearer {{writerToken}}
+
+### Search + filter combo
+GET {{base}}/board/tasks/filter/?search=campaign&priority=high&assigned_to=3
+Authorization: Bearer {{writerToken}}
+
+### Full filter — every param at once
+GET {{base}}/board/tasks/filter/?search=design&status=in_progress&priority=high&marketing_type=social&assigned_to=3&due_before=2026-05-01&tags=q2
+Authorization: Bearer {{writerToken}}
+
+
+
+
+
+
+
+
+
+════════════════════════════════════════════════════════════
+  ✅  SEED COMPLETE
+════════════════════════════════════════════════════════════
+
+  CREDENTIALS  (all passwords: Pass123!)
+  ────────────────────────────────────────────────────
+  admin@platform.com      id=1  admin        full access
+  exec@platform.com       id=2  exec_approver content + board
+  writer@platform.com     id=3  writer        content + board
+  reviewer@platform.com   id=4  reviewer      content + board
+  sme@platform.com        id=5  sme           content only
+
+  CONTENT
+  ────────────────────────────────────────────────────
+  Article 1  draft              Introduction to AI
+  Article 2  pending_executive  Cloud Architecture Guide
+  Article 3  pending_admin      Security Best Practices
+  Article 4  published          Python Performance Tips
+  Article 5  draft (locked)     Docker for Beginners
+  Draft 1    writing (no art.)  Kubernetes for Production
+  Draft 2    writing (art.=1)   Editing Intro to AI
+  Draft 3    submitted (art.=2) Cloud Architecture Guide
+
+  BOARD  (9 tasks — all new fields populated)
+  ────────────────────────────────────────────────────
+  Task 1  to_do        high    Design homepage mockup
+  Task 2  in_progress  medium  Write API documentation
+  Task 3  in_progress  high    Fix login page OTP bug  [transferred]
+  Task 4  completed    medium  Review pull request #42
+  Task 5  to_do        medium  Set up CI/CD pipeline
+  Task 6  completed    high    Database performance audit
+  Task 7  in_progress  medium  Write unit tests for board app
+  Task 8  blocked      high    Q2 Social Media Campaign
+  Task 9  approved     low     Launch blog post for new feature
+════════════════════════════════════════════════════════════
+
+
+#286 line not working
+
+# PATCH {{base}}/board/tasks/1/update/
+# Authorization: Bearer {{writerToken}}
+# Content-Type: application/json
+
+# {
+#   "title": "Updated Campaign Design Task"
+# }

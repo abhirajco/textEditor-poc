@@ -4,8 +4,8 @@ from .models import Task, TaskHistory, Discussion
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display  = ('title', 'stage', 'assigned_to', 'assigned_by', 'created_at')
-    list_filter   = ('stage',)
+    list_display  = ('title', 'status', 'assigned_to', 'assigned_by', 'created_at')
+    list_filter   = ('status',)
     search_fields = ('title', 'assigned_to__email', 'assigned_by__email')
 
 
