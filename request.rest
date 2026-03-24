@@ -165,11 +165,11 @@ Authorization: Bearer {{writerToken}}
 
 ### 3a. View active (unpublished) articles
 GET {{base}}/content/articles/active/
-Authorization: Bearer {{writerToken}}
+Authorization: Bearer {{adminToken}}
 
 ### 3b. View published articles
 GET {{base}}/content/articles/published/
-Authorization: Bearer {{reviewerToken}}
+Authorization: Bearer {{adminToken}}
 
 ### 3c. Create a new draft (Writer only)
 POST {{base}}/content/articles/create/
@@ -181,20 +181,37 @@ Content-Type: application/json
   "content": "This is the article body content."
 }
 
-### 3d. View article detail
-GET {{base}}/content/articles/{{articleId}}/
+###
+GET {{base}}/content/articles/12/history
 Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+
+### 3c. save an article (Writer only)
+POST {{base}}/content/articles/save/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{ 
+  "article_id": "12",
+  "title": "this is a new article version",
+  "content": "This is the 1nd save"
+}
+
+### 3d. View article detail
+GET {{base}}/content/articles/9/
+Authorization: Bearer {{adminToken}}
 
 ### 3e. Lock article for editing (must lock before editing)
-POST {{base}}/content/articles/{{articleId}}/lock/
+POST {{base}}/content/articles/7/lock/
 Authorization: Bearer {{writerToken}}
 
 ### 3f. Unlock article
-DELETE {{base}}/content/articles/{{articleId}}/lock/
-Authorization: Bearer {{writerToken}}
+DELETE {{base}}/content/articles/7/lock/
+Authorization: Bearer {{adminToken}}
 
 ### 3g. Edit article (must hold lock first)
-PUT {{base}}/content/articles/{{articleId}}/edit/
+PUT {{base}}/content/articles/7/edit/
 Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 

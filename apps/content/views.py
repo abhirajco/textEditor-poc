@@ -4,7 +4,7 @@ from django.core.cache import cache
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser ,JSONParser
 from .models import Article, ArticleAssignment, ArticleComment, ArticleVersion
 from accounts.models import User
 from utils.notifications.services import handle_mentions_and_notifications, send_approval_emails, send_assigned_sme_emails
@@ -102,18 +102,28 @@ class WriteComment(APIView):
 
                 # Create the actual comment
                 latest_version = ArticleVersion.objects.filter(article=article).order_by('-created_at').first()
+                
 
-                ArticleComment.objects.create(
+                #making its object to handle redis increamnets 
+                # ArticleComment.objects.create(
+                #     article=article,
+                #     user=request.user,
+                #     comment_text=text,
+                #     version=latest_version # Link it here
+                # )
+
+                comment_obj = ArticleComment.objects.create(
                     article=article,
                     user=request.user,
                     comment_text=text,
-                    version=latest_version # Link it here
+                    version=latest_version 
                 )
+
 
                 cache.delete(f"article_comments_{pk}")
                 
                 # Process Mentions (Now sends emails)
-                handle_mentions_and_notifications(text, article, sender=request.user)
+                handle_mentions_and_notifications(text, article, comment_obj, sender=request.user)
                 
                 return Response({
                     "message": "Feedback recorded.", 
@@ -128,7 +138,7 @@ class WriteComment(APIView):
 
 
 
-#4 article writing
+#4 send for approval
 @extend_schema(
     tags=['Content'],
     request=inline_serializer(
@@ -369,7 +379,7 @@ class ArticleEdit(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
     required_roles = ["update", "write"] 
-    parser_classes = (MultiPartParser, FormParser)
+    parser_classes = (MultiPartParser, FormParser , JSONParser)
 
     def put(self, request, pk):
         
@@ -439,8 +449,10 @@ class ArticleEdit(APIView):
                 return Response({"message": "Article (Title & Content) updated and versioned successfully."})
 
         except Article.DoesNotExist:
+            print("hii1")
             return Response({"error": "Article not found."}, status=404)
         except Exception as e:
+            print("hii2")
             return Response({"error": str(e)}, status=500)
 
 

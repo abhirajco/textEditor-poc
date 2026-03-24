@@ -3,7 +3,8 @@ import random
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.conf import settings
-
+from django.contrib.auth import get_user_model
+from content.models import CommentMention
 
 # ==============================================================================
 # OTP  (shared by both Insight and Kanban signup flows)
@@ -37,7 +38,7 @@ def send_otp_via_email(email: str, pending_data: dict) -> None:
 # INSIGHT — Article mention notifications
 # ==============================================================================
 
-def handle_mentions_and_notifications(text: str, article_obj, sender) -> None:
+def handle_mentions_and_notifications(text: str, article_obj,comment_obj, sender) -> None:
     """
     Parses @[Full Name](user_id) mentions from a comment, adds users to the
     article's mentions M2M, increments their Redis unread counter, and sends
@@ -56,7 +57,12 @@ def handle_mentions_and_notifications(text: str, article_obj, sender) -> None:
             tagged_user = User.objects.get(id=int(user_id))
 
             # Add to article mentions M2M
-            article_obj.mentions.add(tagged_user)
+            # article_obj.mentions.add(tagged_user)
+            CommentMention.objects.get_or_create(
+                user=tagged_user,
+                article=article_obj,
+                comment=comment_obj
+            )
 
             # Increment Redis unread badge counter
             redis_key = f"unread_mentions:{tagged_user.id}"
@@ -64,16 +70,16 @@ def handle_mentions_and_notifications(text: str, article_obj, sender) -> None:
             cache.incr(redis_key)
 
             send_mail(
-                subject        = f"You were mentioned in '{article_obj.title}'",
-                message        = (
+                subject = f"You were mentioned in '{article_obj.title}'",
+                message = (
                     f"Hello {tagged_user.full_name},\n\n"
                     f"{sender.full_name} mentioned you in a comment on '{article_obj.title}'.\n\n"
                     f"Comment:\n{text}\n\n"
                     f"Log in to view it."
                 ),
-                from_email     = settings.EMAIL_HOST_USER,
+                from_email  = settings.EMAIL_HOST_USER,
                 recipient_list = [tagged_user.email],
-                fail_silently  = True,
+                fail_silently = True,
             )
             print(f"✅ Mention notification sent to {tagged_user.email} (id={user_id})")
 
@@ -99,9 +105,9 @@ def send_approval_emails(target_role: str, article) -> None:
 
     try:
         send_mail(
-            subject        = f"Action Required: '{article.title}' is ready for your review",
-            message        = f"The article '{article.title}' has been moved to '{article.status}' and requires your attention.",
-            from_email     = settings.EMAIL_HOST_USER,
+            subject = f"Action Required: '{article.title}' is ready for your review",
+            message  = f"The article '{article.title}' has been moved to '{article.status}' and requires your attention.",
+            from_email = settings.EMAIL_HOST_USER,
             recipient_list = email_list,
             fail_silently  = True,
         )
@@ -121,8 +127,8 @@ def send_assigned_sme_emails(article) -> None:
         return
 
     send_mail(
-        subject        = f"Action Required: You have been assigned to '{article.title}'",
-        message        = (
+        subject = f"Action Required: You have been assigned to '{article.title}'",
+        message = (
             f"Hello,\n\nYou are the appointed SME for the article '{article.title}'.\n"
             f"Please review it at your earliest convenience."
         ),

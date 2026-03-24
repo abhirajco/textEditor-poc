@@ -25,11 +25,12 @@ class Article(models.Model):
         db_index=True
     )
     # Track users mentioned in the content/description
-    mentions = models.ManyToManyField(
-        settings.AUTH_USER_MODEL, 
-        related_name='mentioned_in_articles', 
-        blank=True
-    )
+    # made a whole new table for this
+    # mentions = models.ManyToManyField(
+    #     settings.AUTH_USER_MODEL, 
+    #     related_name='mentioned_in_articles', 
+    #     blank=True
+    # )
     
     # Index 2: Critical for filtering Published vs Active lists
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='draft', db_index=True)
@@ -160,3 +161,21 @@ class ArticleVersion(models.Model):
         return f"Version of {self.article.title} at {self.created_at}"
     
 
+
+class CommentMention(models.Model):
+    """
+    Standalone table storing exactly what you asked for:
+    user_id, article_id, and comment_id.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    article = models.ForeignKey('Article', on_delete=models.CASCADE)
+    comment = models.ForeignKey('ArticleComment', on_delete=models.CASCADE)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = 'content'
+        unique_together = ('user', 'comment') # Prevents tagging the same person twice in one comment
+
+    def __str__(self):
+        return f"User {self.user_id} tagged in Article {self.article_id} Comment {self.comment_id}"
