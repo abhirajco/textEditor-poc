@@ -24,9 +24,11 @@ If you aren't on feature/rbac-update, switch to it:- git checkout feature/rbac-u
 git push origin feature/rbac-update
 
 
+celery -A core worker -l info -P solo  (in differnet terminal)
 
 
-
+docker exec -it platform_postgres psql -U platform_user -d postgres -c "DROP DATABASE platform_db;"
+docker exec -it platform_postgres psql -U platform_user -d postgres -c "CREATE DATABASE platform_db OWNER platform_user;"
 
 
 #content publishing is not working

@@ -64,7 +64,7 @@ class SignupView(APIView):
         name='VerifyOTPRequest',
         fields={
             'email': drf_serializers.EmailField(),
-            'otp':   drf_serializers.CharField(),
+            'otp': drf_serializers.CharField(),
         }
     )
 )
@@ -107,7 +107,7 @@ class VerifyOTPView(APIView):
     request=inline_serializer(
         name='LoginRequest',
         fields={
-            'email':    drf_serializers.EmailField(),
+            'email': drf_serializers.EmailField(),
             'password': drf_serializers.CharField(),
         }
     )
@@ -130,10 +130,10 @@ class LoginView(APIView):
 
         refresh = RefreshToken.for_user(user)
         return Response({
-            "refresh": str(refresh),
-            "access":  str(refresh.access_token),
+            "refresh":str(refresh),
+            "access": str(refresh.access_token),
             "user": {
-                "id": user.id,
+                "id": user.user_id,
                 "email": user.email,
                 "full_name": user.full_name,
                 "group": user.group,
@@ -180,7 +180,7 @@ class ViewAllUsers(APIView):
         users = User.objects.all().order_by('-date_joined')
         data  = [
             {
-                "id": u.id,
+                "id": u.user_id,
                 "full_name": u.full_name,
                 "email": u.email,
                 "group": u.group,
@@ -201,7 +201,11 @@ class PeopleWithoutRole(APIView):
 
     def get(self, request):
         users = User.objects.filter(role='none').order_by('-date_joined')
-        data  = [{"id": u.id, "full_name": u.full_name, "email": u.email, "group": u.group} for u in users]
+        data  = [{"id": u.user_id, 
+                  "full_name": u.full_name, 
+                  "email": u.email, 
+                  "group": u.group}
+                    for u in users]
         return Response(data)
 
 
@@ -242,7 +246,7 @@ class AssignRole(APIView):
 
         try:
             with transaction.atomic():
-                user = User.objects.get(id=user_id)
+                user = User.objects.get(user_id=user_id)
                 user.group = new_group
                 user.role = new_role
 
@@ -325,7 +329,7 @@ class DeleteUser(APIView):
 
     def delete(self, request, user_id):
         try:
-            user = User.objects.get(id=user_id)
+            user = User.objects.get(user_id=user_id)
 
             if user == request.user:
                 return Response({"error": "You cannot delete your own admin account."}, status=400)
@@ -354,7 +358,7 @@ class AdminUserRBACListView(APIView):
                 ).values('application_area', 'application_action')
 
                 user_list.append({
-                    'id':user.id,
+                    'id':user.user_id,
                     'full_name': user.full_name,
                     'email': user.email,
                     'group': user.group,
@@ -408,8 +412,8 @@ class UserSearchView(APIView):
         users = (
             User.objects
             .filter(filters)
-            .exclude(id=request.user.id)
-            .values('id', 'full_name', 'email')[:10]
+            .exclude(user_id=request.user.user_id)
+            .values('user_id', 'full_name', 'email')[:10]
         )
 
         return Response(list(users))

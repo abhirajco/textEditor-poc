@@ -1,181 +1,168 @@
+import uuid
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.db import transaction
 from cloudinary.models import CloudinaryField
 
-class Article(models.Model):
+
+class Content(models.Model):
+    """
+    Main content/article model. Renamed from Article to Content.
+    PK: content_id (UUID)
+    """
     STATUS_CHOICES = [
-        ('draft', 'Draft'),
-        ('pending_executive', 'Pending Executive Review'),
-        ('pending_admin', 'Pending Admin Review'),
-        ('published', 'Published'),
+        ("draft", "Draft"),
+        ("pending_reviewer", "Pending Reviewer"),
+        ("pending_executive", "Pending Executive Review"),
+        ("pending_admin","Pending Admin Review"),
+        ("published",  "Published"),
     ]
 
-    title = models.CharField(max_length=255)
-    content = models.TextField()
-    image = CloudinaryField('image', null=True, blank=True)
-    
-    # Relationships
-    # Index 1: Speeds up "My Articles" dashboard
+    content_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=255, db_index=True)
+    body= models.TextField()   # renamed from 'content' to avoid clash with model name
+    image = CloudinaryField("image", null=True, blank=True)
+
     author = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.CASCADE, 
-        related_name='authored_articles',
-        db_index=True
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="authored_contents",
+        db_index=True,
     )
-    # Track users mentioned in the content/description
-    # made a whole new table for this
-    # mentions = models.ManyToManyField(
-    #     settings.AUTH_USER_MODEL, 
-    #     related_name='mentioned_in_articles', 
-    #     blank=True
-    # )
-    
-    # Index 2: Critical for filtering Published vs Active lists
-    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='draft', db_index=True)
-    
-    # --- Concurrency Locking Fields ---
-    # Prevents "Race Conditions" where two people edit simultaneously
+
+    status = models.CharField(
+        max_length=30, choices=STATUS_CHOICES, default="draft", db_index=True
+    )
+
+    # Concurrency locking
     locked_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True, 
-        related_name='locked_articles'
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="locked_contents",
     )
     locked_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
-    #increases speed for updated at
-    updated_at = models.DateTimeField(auto_now=True , db_index=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
     def __str__(self):
         return f"{self.title} | {self.status}"
 
     class Meta:
-        app_label = 'content'
-        ordering = ['-updated_at']
-        indexes = [
-            models.Index(fields=['locked_by', 'status']),
+        app_label = "content"
+        ordering = ["-updated_at"]
+        indexes= [
+            models.Index(fields=["locked_by", "status"]),
+            models.Index(fields=["author", "status"]),
         ]
 
 
-class ArticleAssignment(models.Model):
-    
-    #for smes assignemnet
-    article = models.ForeignKey(
-        Article, 
-        on_delete=models.CASCADE, 
-        related_name='sme_assignments'
-    )
+class ContentAssignment(models.Model):
+    """Links a specific SME to a specific content piece. Renamed from ArticleAssignment."""
+
+    assignment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    content = models.ForeignKey(Content, on_delete=models.CASCADE, related_name="sme_assignments")
     sme = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.CASCADE, 
-        limit_choices_to={'role': 'sme'},
-        related_name='sme_tasks'
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        limit_choices_to={"role": "sme"},
+        related_name="sme_tasks",
     )
-    assigned_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        related_name='assignments_given'
+    assigned_by= models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="assignments_given",
     )
-    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_at   = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        app_label = 'content'
-        unique_together = ('article', 'sme') # Atomic protection against duplicate assignments
-        # Index 4: Speeds up the "Is this SME assigned to this article?" check
+        app_label = "content"
+        unique_together = ("content", "sme")
         indexes = [
-            models.Index(fields=['article', 'sme'], name='idx_article_sme_lookup'),
+            models.Index(fields=["content", "sme"], name="idx_content_sme_lookup"),
         ]
 
     def __str__(self):
-        return f"{self.sme.full_name} assigned to {self.article.title}"
+        return f"{self.sme.full_name} → {self.content.title}"
 
 
-class ArticleComment(models.Model):
+class ContentComment(models.Model):
     """
-    Feedback Loop: Supports @mentions and triggers status reverts.
+    Feedback on a content piece. Renamed from ArticleComment.
+    When admin/executive comments, content is auto-reverted to draft.
     """
-    article = models.ForeignKey(
-        Article, 
-        on_delete=models.CASCADE, 
-        related_name='comments'
+
+    comment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    content = models.ForeignKey(Content, on_delete=models.CASCADE, related_name="comments")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    version = models.ForeignKey(
+        "ContentVersion", on_delete=models.SET_NULL, null=True, blank=True
     )
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.CASCADE
-    )
-    version = models.ForeignKey('ArticleVersion', on_delete=models.SET_NULL, null=True, blank=True)
     comment_text = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        """
-        Atomic Trigger: If Admin or Executive comments, 
-        kick the article back to 'draft' status automatically.
-        """
         with transaction.atomic():
-            # Check user role from the accounts app
-            if hasattr(self.user, 'group') and self.user.group in ['admin', 'executive']:
-                # Update parent article status
-                self.article.status = 'draft'
-                # Clear any existing locks so the writer can fix it
-                self.article.locked_by = None
-                self.article.locked_at = None
-                self.article.save()
-            
+            if hasattr(self.user, "group") and self.user.group in ["admin", "executive"]:
+                self.content.status = "draft"
+                self.content.locked_by = None
+                self.content.locked_at = None
+                self.content.save()
             super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Comment by {self.user.full_name} on {self.article.title}"
+        return f"Comment by {self.user.full_name} on {self.content.title}"
 
     class Meta:
-        app_label = 'content'
+        app_label = "content"
+        ordering  = ["created_at"]
 
 
-class ArticleVersion(models.Model):
-    article = models.ForeignKey(
-        'Article', 
-        on_delete=models.CASCADE, 
-        related_name='versions'
+class ContentVersion(models.Model):
+    """
+    Immutable snapshot of a content piece at a point in time.
+    Renamed from ArticleVersion.
+    Write-heavy — created in background via Celery.
+    """
+
+    version_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    content = models.ForeignKey(
+        Content, on_delete=models.CASCADE, related_name="versions", db_index=True
     )
     title = models.CharField(max_length=255)
-    content = models.TextField()
+    body = models.TextField()
     image_url = models.URLField(max_length=500, null=True, blank=True)
     changed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True
     )
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        ordering = ['-created_at'] 
-        app_label = 'content' # Added for consistency with your other models
+        app_label= "content"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["content", "created_at"]),
+        ]
 
     def __str__(self):
-        # Change 'article.title' to 'self.article.title'
-        return f"Version of {self.article.title} at {self.created_at}"
-    
+        return f"Version of {self.content.title} at {self.created_at}"
 
 
 class CommentMention(models.Model):
-    """
-    Standalone table storing exactly what you asked for:
-    user_id, article_id, and comment_id.
-    """
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    article = models.ForeignKey('Article', on_delete=models.CASCADE)
-    comment = models.ForeignKey('ArticleComment', on_delete=models.CASCADE)
-    
+    """Tracks which users were @mentioned in which comment."""
+
+    mention_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user  = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    content = models.ForeignKey(Content, on_delete=models.CASCADE)
+    comment = models.ForeignKey(ContentComment, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        app_label = 'content'
-        unique_together = ('user', 'comment') # Prevents tagging the same person twice in one comment
+        app_label = "content"
+        unique_together = ("user", "comment")
 
     def __str__(self):
-        return f"User {self.user_id} tagged in Article {self.article_id} Comment {self.comment_id}"
+        return f"{self.user.full_name} mentioned in comment {self.comment_id}"

@@ -1,759 +1,548 @@
+"""
+Content views — unified save/edit/submit flow.
+Renamed from Article to Content throughout.
+"""
 from django.db import transaction
 from django.utils import timezone
 from django.core.cache import cache
-from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser ,JSONParser
-from .models import Article, ArticleAssignment, ArticleComment, ArticleVersion
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from .models import Content, ContentAssignment, ContentComment, ContentVersion, CommentMention
 from accounts.models import User
-from utils.notifications.services import handle_mentions_and_notifications, send_approval_emails, send_assigned_sme_emails
-from .serializers import ArticleSerializer
-# Custom RBAC Import
-from utils.permissions.base import HasRBACPermission 
+from utils.notifications.services import handle_mentions_and_notifications
+from .serializers import ContentSerializer
+from utils.permissions.base import HasRBACPermission
 from django.db.models import OuterRef, Subquery
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, inline_serializer
-from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
 from rest_framework import serializers as drf_serializers
 
-# --- 1. LIST VIEWS ---
-#non published articles
-@extend_schema(tags=['Content'])
-class ActiveArticleListView(APIView):
-    
+
+# ── 1. LIST VIEWS ─────────────────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
+class ActiveContentListView(APIView):
     permission_classes = [HasRBACPermission]
-    required_area = "content"
+    required_area  = "content"
     required_roles = ["read", "write", "feedback", "admin"]
 
     def get(self, request):
-
-        cache_key = "active_articles_list"
+        cache_key   = "active_contents_list"
         cached_data = cache.get(cache_key)
-
         if cached_data:
             return Response(cached_data)
-        
-        articles = Article.objects.exclude(status='published').order_by('-updated_at')
-        serializer = ArticleSerializer(articles, many=True)
-
-        # Store in Redis for 5 minutes
+        contents   = Content.objects.exclude(status="published").order_by("-updated_at")
+        serializer = ContentSerializer(contents, many=True)
         cache.set(cache_key, serializer.data, timeout=300)
-
         return Response(serializer.data)
 
-#2 published article
-@extend_schema(tags=['Content'])
-class PublishedArticleListView(APIView):
-   
+
+@extend_schema(tags=["Content"])
+class PublishedContentListView(APIView):
     permission_classes = [HasRBACPermission]
-    required_area = "content"
+    required_area  = "content"
     required_roles = ["read", "write", "feedback", "admin"]
 
     def get(self, request):
-
-        cache_key = "published_articles_list"
+        cache_key   = "published_contents_list"
         cached_data = cache.get(cache_key)
-
         if cached_data:
             return Response(cached_data)
-        
-        articles = Article.objects.filter(status='published').order_by('-updated_at')
-        serializer = ArticleSerializer(articles, many=True)
-
-        # Store in Redis for 15 minutes (Published changes less often)
+        contents   = Content.objects.filter(status="published").order_by("-updated_at")
+        serializer = ContentSerializer(contents, many=True)
         cache.set(cache_key, serializer.data, timeout=900)
         return Response(serializer.data)
 
 
-# --- 3. for commenting ---
-@extend_schema(
-    tags=['Content'],
-    request=inline_serializer(
-        name='WriteCommentRequest',
-        fields={
-            'comment_text': drf_serializers.CharField(
-                help_text='Comment text. Supports @[Full Name](user_id) mention format.'
-            ),
-        }
-    )
-)
-class WriteComment(APIView):
-    #Add feedback, trigger @mention emails
+# ── 2. CONTENT DETAIL ─────────────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
+class ContentDetailView(APIView):
     permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["feedback", "admin"]
+    required_area  = "content"
+    required_roles = ["read", "write", "feedback", "admin"]
 
-    def post(self, request, pk):
-        text = request.data.get('comment_text')
-        
+    def get(self, request, content_id):
         try:
-            with transaction.atomic():
-                article = Article.objects.select_for_update().get(pk=pk)
-                
-                if request.user.role == 'sme':
-                    if not ArticleAssignment.objects.filter(article=article, sme=request.user).exists():
-                        return Response({"error": "Not assigned to this article."}, status=403)
-
-                # If Exec or Admin comments, it kicks back to Draft
-                # if request.user.role in ['executive', 'admin']:
-                article.status = 'draft'
-                article.locked_by = None # Unlock it so writers can fix it
-                article.save()
-
-                # Create the actual comment
-                latest_version = ArticleVersion.objects.filter(article=article).order_by('-created_at').first()
-                
-
-                #making its object to handle redis increamnets 
-                # ArticleComment.objects.create(
-                #     article=article,
-                #     user=request.user,
-                #     comment_text=text,
-                #     version=latest_version # Link it here
-                # )
-
-                comment_obj = ArticleComment.objects.create(
-                    article=article,
-                    user=request.user,
-                    comment_text=text,
-                    version=latest_version 
-                )
-
-
-                cache.delete(f"article_comments_{pk}")
-                
-                # Process Mentions (Now sends emails)
-                handle_mentions_and_notifications(text, article, comment_obj, sender=request.user)
-                
-                return Response({
-                    "message": "Feedback recorded.", 
-                    "new_article_status": article.status
-                })
-                
-        except Article.DoesNotExist:
-            return Response({"error": "Article not found."}, status=404)
-        
-        except Exception as e:
-            return Response({"error": str(e)})
-
-
-
-#4 send for approval
-@extend_schema(
-    tags=['Content'],
-    request=inline_serializer(
-        name='ArticleCreateRequest',
-        fields={
-            'title':   drf_serializers.CharField(),
-            'content': drf_serializers.CharField(),
-            'image':   drf_serializers.ImageField(required=False),
-        }
-    )
-)
-class ArticleCreate(APIView):
-    
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["write"]
-    parser_classes = (MultiPartParser, FormParser) # Added for Image
-
-    def post(self, request):
-        title = request.data.get('title')
-        content = request.data.get('content')
-        image = request.FILES.get('image')
-
-        try:
-            with transaction.atomic():
-                article = Article.objects.create(
-                    title=title,
-                    content=content,
-                    image=image,
-                    author=request.user,
-                    status='draft'
-                )
-
-                ArticleVersion.objects.create(
-                    article=article,
-                    title=title,
-                    content=content,
-                    image_url=article.image.url if article.image else None,
-                    changed_by=request.user
-                )
-
-                cache.delete("active_articles_list")
-                # Notify ALL Reviewers that a new draft needs an SME assigned
-                send_approval_emails('reviewer', article)
-
-                return Response({"id": article.id, "message": "Draft created. Reviewers notified for assignment."}, status=201)
-        except Exception as e:
-            return Response({"error": str(e)}, status=400)
-
-
-#5 - when a version is clicked then all the details will be shown
-@extend_schema(tags=['Content'])
-class ArticleDetailView(APIView):
-   
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["read", "write", "feedback", "admin"] 
-
-    def get(self, request, pk):
-        try:
-            article = Article.objects.get(pk=pk)
-            is_locked = article.locked_by is not None and article.locked_by != request.user
-            
+            c         = Content.objects.get(content_id=content_id)
+            is_locked = c.locked_by is not None and c.locked_by != request.user
             return Response({
-                "id": article.id,
-                "title": article.title,
-                "content": article.content,
-                "image_url": article.image.url if article.image else None, 
-                "status": article.status,
-                "author": article.author.full_name,
-                "locked_by": article.locked_by.full_name if article.locked_by else None,
-                "is_locked": is_locked
+                "content_id": str(c.content_id),
+                "title":      c.title,
+                "body":       c.body,
+                "image_url":  c.image.url if c.image else None,
+                "status":     c.status,
+                "author":     c.author.full_name,
+                "locked_by":  c.locked_by.full_name if c.locked_by else None,
+                "is_locked":  is_locked,
             })
-        except Article.DoesNotExist:
-            return Response({"error": "Article not found"}, status=404)
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
 
 
-#6
-@extend_schema(tags=['Content'])
-class ArticleLock(APIView):
-   
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["write", "update"] # Writers and Reviewers/SMEs can lock
+# ── 3. LOCK ───────────────────────────────────────────────────────────────────
 
-    def post(self, request, pk):
-        with transaction.atomic():
-           try:
-                article = Article.objects.select_for_update().get(pk=pk)
-
-                if request.user.role == 'sme':
-                    if not ArticleAssignment.objects.filter(article=article, sme=request.user).exists():
-                        return Response({"error": "You are not assigned to this article."}, status=403)
-            
-                if article.locked_by and article.locked_by != request.user:
-                    return Response({"error": f"Currently locked by {article.locked_by.full_name}"}, status=423)
-            
-                article.locked_by = request.user
-                article.locked_at = timezone.now()
-                article.save()
-                return Response({"message": "Lock acquired. You can now edit."})
-           
-           except Exception as e:
-               return Response({"error": str(e)}, status=400)
-
-    def delete(self, request, pk):
-        try:
-            article = Article.objects.get(pk=pk)
-            if article.locked_by == request.user:
-                article.locked_by = None
-                article.locked_at = None
-                article.save()
-                return Response({"message": "Lock released."})
-            return Response({"error": "You do not hold the lock."}, status=403)
-        except Exception as e:
-            return Response({"error": str(e)} , status=400)
-
-
-#7
-@extend_schema(
-    tags=['Content'],
-    request=inline_serializer(
-        name='AssignSMERequest',
-        fields={
-            'sme_id': drf_serializers.IntegerField(help_text='ID of the SME user to assign'),
-        }
-    )
-)
-class AssignSMEView(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["feedback"] 
-
-    def post(self, request, pk):
-        sme_id = request.data.get('sme_id')
-        try:
-            with transaction.atomic():
-                article = Article.objects.select_for_update().get(pk=pk)
-                sme = User.objects.get(id=sme_id, role='sme')
-                
-                assignment, created = ArticleAssignment.objects.get_or_create(
-                    article=article,
-                    sme=sme,
-                    defaults={'assigned_by': request.user}
-                )
-                
-                if created:
-                    # Notify ONLY this specific SME now that they are assigned
-                    send_assigned_sme_emails(article) 
-                    return Response({"message": f"Successfully assigned {sme.full_name} to {article.title}."})
-                
-                return Response({"error": "SME is already assigned."}, status=400)
-                
-        # except User.DoesNotExist:
-        #     return Response({"error": "Invalid SME ID."}, status=404)
-        
-        except Exception as e:
-            return Response({"error": str(e)}, status=400)
-
-
-#8
-@extend_schema(tags=['Content'])
-class ApproveArticle(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["feedback", "admin" , "promote"]
-
-    def post(self, request, pk):
-        try:
-            with transaction.atomic():
-                article = Article.objects.select_for_update().get(pk=pk)
-                user = request.user
-                user_role = user.role
-
-
-                # STEP 1: Technical Approval (Reviewer or APPOINTED SME)
-                if article.status == 'draft':
-                    if user_role == 'reviewer':
-                        pass # Reviewers can approve any draft
-                    elif user_role == 'sme':
-                        # CHECK: Is this specific SME assigned?
-                        is_assigned = ArticleAssignment.objects.filter(
-                            article=article, 
-                            sme=user
-                        ).exists()
-                        
-                        if not is_assigned:
-                            return Response({
-                                "error": "Approval denied. You are not the appointed SME for this article."
-                            }, status=403)
-                    else:
-                        return Response({"error": "Only Reviewers or assigned SMEs can perform technical approval."}, status=403)
-
-                    # If checks pass, proceed to move status
-                    article.status = 'pending_executive'
-                    article.save()
-                    cache.delete("active_articles_list")
-                    send_approval_emails('exec_approver', article)
-                    return Response({"message": "Technical approval complete. Sent to Executives."})
-
-                # STEP 2: Executive approves
-                elif user_role == 'exec_approver' and article.status == 'pending_executive':
-                    article.status = 'pending_admin'
-                    article.save()
-                    cache.delete("active_articles_list")
-                    send_approval_emails('admin', article)
-                    return Response({"message": "Executive approval complete. Sent to Admins."})
-
-                # STEP 3: Admin approves (Final)
-                elif user_role == 'admin' and article.status == 'pending_admin':
-                    article.status = 'published'
-                    article.save()
-                    cache.delete("active_articles_list")
-                    cache.delete("published_articles_list")
-                    return Response({"message": "Article has been Published!"})
-
-                return Response({"error": "Invalid approval stage or insufficient permissions."}, status=403)
-
-        # except Article.DoesNotExist:
-        #     return Response({"error": "Article not found."}, status=404)
-        except Exception as e:
-            return Response({"error": str(e)}, status=400)
-
-
-#9
-@extend_schema(
-    tags=['Content'],
-    request=inline_serializer(
-        name='ArticleEditRequest',
-        fields={
-            'title':   drf_serializers.CharField(),
-            'content': drf_serializers.CharField(),
-            'image':   drf_serializers.ImageField(required=False),
-        }
-    )
-)
-class ArticleEdit(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["update", "write"] 
-    parser_classes = (MultiPartParser, FormParser , JSONParser)
-
-    def put(self, request, pk):
-        
-        title = request.data.get('title')
-        content = request.data.get('content')
-        image_file = request.FILES.get('image')
-
-        if not title or not content:
-            return Response({"error": "Both Title and Content are required."}, status=400)
-
-        try:
-            with transaction.atomic():
-                # select_for_update() keeps requests in a queue
-                article = Article.objects.select_for_update().get(pk=pk)
-                user = request.user
-
-                # 1. AUTHORIZATION CHECK
-                is_author = (article.author == user)
-                is_reviewer = (user.role == 'reviewer')
-                is_assigned_sme = (
-                    user.role == 'sme' and 
-                    ArticleAssignment.objects.filter(article=article, sme=user).exists()
-                )
-
-                if not (is_author or is_reviewer or is_assigned_sme):
-                    return Response({
-                        "error": "Access Denied. Only Author, Reviewer, or Assigned SME can edit."
-                    }, status=403)
-
-                # 2. LOCK VALIDATION (Fixing the crash)
-                if article.locked_by is None:
-                    return Response({
-                        "error": "Article is not locked. Acquire the lock first."
-                    }, status=423)
-
-                if article.locked_by != user:
-                    # Added safe access to full_name
-                    owner_name = getattr(article.locked_by, 'full_name', 'Another User')
-                    return Response({
-                        "error": f"Article is locked by {owner_name}. You cannot edit."
-                    }, status=423)
-
-                # 3. SAVE VERSION (Storing Title + Body)
-                ArticleVersion.objects.create(
-                    article=article,
-                    title=title,    # Saving historical title
-                    content=content, # Saving historical content
-                    image_url=article.image.url if article.image else None,
-                    changed_by=user
-                )
-
-                # 4. COMMIT CHANGES TO MAIN ARTICLE
-                article.title = title       # Update Title
-                article.content = content   # Update Content
-                if image_file:
-                    article.image = image_file
-                article.locked_by = None    # Auto-unlock after save
-                article.locked_at = None
-                article.updated_at = timezone.now()
-                
-                # Clean Caches
-                cache.delete("active_articles_list")
-                cache.delete(f"article_comments_{pk}")
-                
-                article.save()
-
-                return Response({"message": "Article (Title & Content) updated and versioned successfully."})
-
-        except Article.DoesNotExist:
-            print("hii1")
-            return Response({"error": "Article not found."}, status=404)
-        except Exception as e:
-            print("hii2")
-            return Response({"error": str(e)}, status=500)
-
-
-#10
-@extend_schema(tags=['Content'])
-class ArticleVersionHistory(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["read" , "feedback" , "admin" , "promote"]
-
-    def get(self, request, pk):
-        try:
-            article = Article.objects.get(pk=pk)
-            user = request.user
-
-            # Authorization Check: Author, Reviewer, Admin, or Assigned SME
-            is_assigned_sme = (
-                user.role == 'sme' and 
-                ArticleAssignment.objects.filter(article=article, sme=user).exists()
-            )
-            
-            # if not (article.author == user or user.role in ['reviewer', 'admin'] or is_assigned_sme):
-            #     return Response({"error": "You do not have permission to view this history."}, status=403)
-
-            if not (article.author == user or user.role in ['reviewer', 'admin', "exec_approver"] or is_assigned_sme):
-                return Response({"error": "You do not have permission to view this history."}, status=403)
-
-
-            # Fetch versions (Ordering is handled by the Model Meta)
-            versions = ArticleVersion.objects.filter(article=article).select_related('changed_by')
-            
-            data = []
-            for v in versions:
-                data.append({
-                    "version_id": v.id,
-                    "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
-                    "role": v.changed_by.role if v.changed_by else "N/A",
-                    "timestamp": v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "title": v.title, # Added
-                    "image_url": v.image_url,
-                    "content_preview": v.content[:100] + "..." # Snippet for the list
-                })
-
-            return Response({
-                "article_title": article.title,
-                "current_status": article.status,
-                "history": data
-            })
-
-        except Article.DoesNotExist:
-            return Response({"error": "Article not found."}, status=404)
-
-
-#11
-@extend_schema(tags=['Content'])
-class ArticleCommentHistoryView(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["read" , "feedback" , "admin" , "promote"]
-
-    def get(self, request, pk):
-
-        cache_key = f"article_comments_{pk}"
-        cached_data = cache.get(cache_key)
-
-        if cached_data:
-            return Response(cached_data)
-        try:
-            article = Article.objects.get(pk=pk)
-            
-            # Use a subquery to find the version ID that was created 
-            # just before or at the same time as the comment
-            version_subquery = ArticleVersion.objects.filter(
-                article=article,
-                created_at__lte=OuterRef('created_at')
-            ).order_by('-created_at').values('id')[:1]
-
-            comments = ArticleComment.objects.filter(article=article).select_related('user').annotate(
-                detected_version_id=Subquery(version_subquery)
-            ).order_by('created_at')
-
-            comment_data = []
-            for comment in comments:
-                comment_data.append({
-                    "comment_id": comment.id,
-                    "user": comment.user.full_name,
-                    "role": comment.user.role,
-                    "text": comment.comment_text,
-                    "timestamp": comment.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "version_at_time": f"{comment.detected_version_id}" if comment.detected_version_id else "Initial Draft"
-                })
-
-            response_data = {
-                "article_title": article.title,
-                "comments": comment_data
-            }
-            
-            # Cache for 10 minutes
-            cache.set(cache_key, response_data, timeout=600)
-            return Response(response_data)
-
-        except Article.DoesNotExist:
-            return Response({"error": "Article not found."}, status=404)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-
-#12
-@extend_schema(
-    tags=['Content'],
-    request=inline_serializer(
-        name='CommentEditRequest',
-        fields={
-            'comment_text': drf_serializers.CharField(),
-        }
-    )
-)
-class CommentEditDelete(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["feedback", "admin"] # Roles allowed to access the endpoint
-
-    def patch(self, request, comment_id):
-        """Strictly only the writer can edit."""
-        try:
-            comment = ArticleComment.objects.get(id=comment_id)
-            
-            # REMOVED Admin check: ONLY the writer is allowed
-            if comment.user != request.user:
-                return Response({"error": "Ownership Required: You did not write this comment."}, status=403)
-
-            new_text = request.data.get('comment_text')
-            if not new_text:
-                return Response({"error": "Comment text is required."}, status=400)
-
-            comment.comment_text = new_text
-            comment.save()
-
-            cache.delete(f"article_comments_{comment.article.id}")
-            return Response({"message": "Comment updated."})
-            
-        except ArticleComment.DoesNotExist:
-            return Response({"error": "Comment not found."}, status=404)
-
-    def delete(self, request, comment_id):
-        """Strictly only the writer can delete."""
-        try:
-            comment = ArticleComment.objects.get(id=comment_id)
-            
-            # STRICT Check: request.user must match comment.user exactly
-            if comment.user != request.user:
-                return Response({"error": "Access Denied: You can only delete your own comments."}, status=403)
-
-            article_id = comment.article.id
-            comment.delete()
-            
-            cache.delete(f"article_comments_{article_id}")
-            return Response({"message": "Comment removed."})
-
-        except ArticleComment.DoesNotExist:
-            return Response({"error": "Comment not found."}, status=404)
-
-
-@extend_schema(
-    tags=['Content'],
-    request=inline_serializer(
-        name='SaveVersionRequest',
-        fields={
-            'title':      drf_serializers.CharField(),
-            'content':    drf_serializers.CharField(),
-            'article_id': drf_serializers.IntegerField(
-                required=False,
-                help_text='Leave empty for fresh content. Send existing article ID when editing.'
-            ),
-        }
-    )
-)
-class SaveVersionView(APIView):
-    """
-    POST /api/content/articles/save/
-
-    Saves content and creates an ArticleVersion snapshot on every click.
-
-    Scenario A — Fresh content (no article yet):
-        Body: { title, content }   ← no article_id
-        → Creates Article (status='draft')
-        → Creates ArticleVersion
-        → Returns { article_id, version_id, message }
-
-    Scenario B — Existing article:
-        Body: { article_id, title, content }
-        → Updates Article title + content
-        → Creates new ArticleVersion
-        → Returns { article_id, version_id, message }
-
-    Lock is NOT required. Lock is NOT released. No review triggered.
-    This is purely a save-and-snapshot action.
-    """
+@extend_schema(tags=["Content"])
+class ContentLock(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
     required_roles = ["write", "update"]
 
+    def post(self, request, content_id):
+        with transaction.atomic():
+            try:
+                c = Content.objects.select_for_update().get(content_id=content_id)
+                if request.user.role == "sme":
+                    if not ContentAssignment.objects.filter(content=c, sme=request.user).exists():
+                        return Response({"error": "You are not assigned to this content."}, status=403)
+                if c.locked_by and c.locked_by != request.user:
+                    return Response({"error": f"Locked by {c.locked_by.full_name}"}, status=423)
+                c.locked_by   = request.user
+                c.locked_at   = timezone.now()
+                c._skip_version = True
+                c.save()
+                return Response({"message": "Lock acquired."})
+            except Content.DoesNotExist:
+                return Response({"error": "Content not found."}, status=404)
+
+    def delete(self, request, content_id):
+        try:
+            c = Content.objects.get(content_id=content_id)
+            if c.locked_by == request.user:
+                c.locked_by   = None
+                c.locked_at   = None
+                c._skip_version = True
+                c.save()
+                return Response({"message": "Lock released."})
+            return Response({"error": "You do not hold the lock."}, status=403)
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+
+
+# ── 4. UNIFIED SAVE VIEW ──────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content"],
+    request=inline_serializer(
+        name="SaveContentRequest",
+        fields={
+            "title":           drf_serializers.CharField(),
+            "body":            drf_serializers.CharField(),
+            "content_id":      drf_serializers.UUIDField(required=False),
+            "image":           drf_serializers.ImageField(required=False),
+            "submit":          drf_serializers.BooleanField(required=False, default=False),
+            "notify_user_ids": drf_serializers.ListField(
+                                   child=drf_serializers.UUIDField(), required=False),
+        }
+    )
+)
+class SaveContentView(APIView):
+    """
+    POST /api/content/contents/save/
+
+    A — No content_id: creates fresh content, auto-acquires lock.
+    B — content_id, submit=false: saves draft (lock required).
+    C — content_id, submit=true: submits for review, notifies selected users.
+    """
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["write", "update"]
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
+
     def post(self, request):
-        title = request.data.get('title', '').strip()
-        content= request.data.get('content', '').strip()
-        article_id = request.data.get('article_id', None)
+        title      = request.data.get("title", "").strip()
+        body       = request.data.get("body", "").strip()
+        content_id = request.data.get("content_id")
+        submit     = request.data.get("submit", False)
+        notify_ids = request.data.get("notify_user_ids", [])
+        image_file = request.FILES.get("image")
 
         if not title:
-            return Response({"error": "Title is required."}, status=400)
-        if not content:
-            return Response({"error": "Content is required."}, status=400)
+            return Response({"error": "title is required."}, status=400)
+        if not body:
+            return Response({"error": "body is required."}, status=400)
+        if submit and not notify_ids:
+            return Response({"error": "notify_user_ids required when submit=true."}, status=400)
 
         try:
             with transaction.atomic():
+                user = request.user
 
-                if article_id:
-                    # ── Scenario B: existing article ──────────────────────────
-                    try:
-                        article = Article.objects.select_for_update().get(pk=article_id)
-                    except Article.DoesNotExist:
-                        return Response({"error": "Article not found."}, status=404)
-
-                    # Only author, reviewer, or assigned SME can save
-                    user = request.user
-                    is_author= (article.author == user)
-                    is_reviewer= (user.role == 'reviewer')
-                    is_assigned_sme = (
-                        user.role == 'sme' and
-                        ArticleAssignment.objects.filter(article=article, sme=user).exists()
-                    )
-                    if not (is_author or is_reviewer or is_assigned_sme):
-                        return Response(
-                            {"error": "Access denied. Only the author, reviewer, or assigned SME can save."},
-                            status=403
-                        )
-
-                    # Update article with latest content
-                    article.title= title
-                    article.content = content
-                    article.save()
-
-                else:
-                    # ── Scenario A: fresh content, no article yet ─────────────
-                    article = Article.objects.create(
+                if not content_id:
+                    # Scenario A — fresh content
+                    c = Content.objects.create(
                         title = title,
-                        content = content,
-                        author= request.user,
-                        status = 'draft',
+                        body = body,
+                        author= user,
+                        status = "draft",
+                        locked_by = user,
+                        locked_at = timezone.now(),
                     )
+                    if image_file:
+                        c.image = image_file
+                    c._version_data = {"title": title, "body": body,
+                                       "image_url": c.image.url if c.image else None,
+                                       "changed_by_id": str(user.user_id)}
+                    c.save()
+                    return Response({
+                        "content_id": str(c.content_id),
+                        "message":    "Draft created. Lock auto-acquired.",
+                        "status":     c.status,
+                    }, status=201)
 
-                # Create version snapshot (same for both scenarios)
-                version = ArticleVersion.objects.create(
-                    article = article,
-                    title = title,
-                    content = content,
-                    image_url = article.image.url if article.image else None,
-                    changed_by = request.user,
+                # Scenario B/C — existing content
+                c = Content.objects.select_for_update().get(content_id=content_id)
+
+                is_author= (c.author == user)
+                is_reviewer = (user.role == "reviewer")
+                is_assigned_sme = (
+                    user.role == "sme" and
+                    ContentAssignment.objects.filter(content=c, sme=user).exists()
                 )
+                if not (is_author or is_reviewer or is_assigned_sme):
+                    return Response({"error": "Access denied."}, status=403)
 
-                # Bust article list cache
-                cache.delete("active_articles_list")
+                if c.locked_by is None:
+                    return Response({"error": "Acquire the lock first."}, status=423)
+                if c.locked_by != user:
+                    return Response({"error": f"Locked by {c.locked_by.full_name}."}, status=423)
 
-            return Response({
-                "article_id": article.id,
-                "version_id": version.id,
-                "message":    "Saved successfully. Version snapshot created.",
-            }, status=201)
+                c.title = title
+                c.body = body
+                if image_file:
+                    c.image = image_file
 
+                c._version_data = {"title": title, "body": body,
+                                   "image_url": c.image.url if c.image else None,
+                                   "changed_by_id": str(user.user_id)}
+
+                if submit:
+                    c.status = "pending_reviewer"
+                    c.locked_by = None
+                    c.locked_at = None
+                    c.save()
+                    from content.tasks import send_approval_email_task
+                    send_approval_email_task.delay(
+                        user_ids   = [str(uid) for uid in notify_ids],
+                        content_id = str(c.content_id),
+                        stage      = "pending_reviewer",
+                    )
+                    return Response({"content_id": str(c.content_id), "status": c.status,
+                                     "message": "Submitted for review."})
+                else:
+                    c.save()
+                    return Response({"content_id": str(c.content_id), "status": c.status,
+                                     "message": "Draft saved, version created."})
+
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
 
-@extend_schema(tags=['Content'])
-class LatestVersionView(APIView):
-    """
-    GET /api/content/articles/<pk>/latest-version/
+# ── 5. REVIEWER LIST ─────────────────────────────────────────────────────────
 
-    Returns the most recent ArticleVersion for this article.
-    Useful for "restore last saved" or showing current version info.
-    """
+@extend_schema(tags=["Content"])
+class ReviewerListView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["write"]
+
+    def get(self, request):
+        users = User.objects.filter(role__in=["reviewer","writer"], is_active=True).exclude(user_id=request.user.user_id)
+        data  = [{"user_id": str(u.user_id), "full_name": u.full_name, "email": u.email, "role": u.role} for u in users]
+        return Response(data)
+
+
+# ── 6. NOTIFY CANDIDATES ─────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content"],
+    parameters=[OpenApiParameter("stage", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                                  enum=["pending_executive","pending_admin"])]
+)
+class NotifyCandidatesView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["feedback", "promote", "admin"]
+
+    def get(self, request, content_id):
+        stage = request.query_params.get("stage", "")
+        role_map = {"pending_executive": "exec_approver", "pending_admin": "admin"}
+        target_role = role_map.get(stage)
+        if not target_role:
+            return Response({"error": "stage must be pending_executive or pending_admin"}, status=400)
+        users = User.objects.filter(role=target_role, is_active=True)
+        data  = [{"user_id": str(u.user_id), "full_name": u.full_name, "email": u.email} for u in users]
+        return Response(data)
+
+
+# ── 7. ASSIGN SME ────────────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content"],
+    request=inline_serializer(name="AssignSMERequest",
+                               fields={"sme_id": drf_serializers.UUIDField()})
+)
+class AssignSMEView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["feedback"]
+
+    def post(self, request, content_id):
+        sme_id = request.data.get("sme_id")
+        try:
+            with transaction.atomic():
+                c   = Content.objects.select_for_update().get(content_id=content_id)
+                sme = User.objects.get(user_id=sme_id, role="sme")
+                assignment, created = ContentAssignment.objects.get_or_create(
+                    content=c, sme=sme, defaults={"assigned_by": request.user}
+                )
+                if created:
+                    from content.tasks import send_sme_assignment_email_task
+                    send_sme_assignment_email_task.delay(str(c.content_id))
+                    return Response({"message": f"Assigned {sme.full_name}."})
+                return Response({"error": "SME already assigned."}, status=400)
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+        except User.DoesNotExist:
+            return Response({"error": "SME not found."}, status=404)
+
+
+# ── 8. APPROVE ───────────────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content"],
+    request=inline_serializer(name="ApproveContentRequest",
+                               fields={"notify_user_ids": drf_serializers.ListField(child=drf_serializers.UUIDField())})
+)
+class ApproveContent(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["feedback", "admin", "promote"]
+
+    def post(self, request, content_id):
+        notify_ids = request.data.get("notify_user_ids", [])
+        try:
+            with transaction.atomic():
+                c         = Content.objects.select_for_update().get(content_id=content_id)
+                user      = request.user
+                user_role = user.role
+                from content.tasks import send_approval_email_task
+
+                if c.status == "pending_reviewer":
+                    if user_role not in ["reviewer", "sme"]:
+                        return Response({"error": "Only reviewers or SMEs can approve at this stage."}, status=403)
+                    if user_role == "sme" and not ContentAssignment.objects.filter(content=c, sme=user).exists():
+                        return Response({"error": "Not the assigned SME."}, status=403)
+                    if not notify_ids:
+                        return Response({"error": "notify_user_ids required."}, status=400)
+                    c.status = "pending_executive"
+                    c.save()
+                    send_approval_email_task.delay([str(u) for u in notify_ids], str(c.content_id), "pending_executive")
+                    return Response({"message": "Sent to executives.", "status": c.status})
+
+                elif user_role == "exec_approver" and c.status == "pending_executive":
+                    if not notify_ids:
+                        return Response({"error": "notify_user_ids required."}, status=400)
+                    c.status = "pending_admin"
+                    c.save()
+                    send_approval_email_task.delay([str(u) for u in notify_ids], str(c.content_id), "pending_admin")
+                    return Response({"message": "Sent to admins.", "status": c.status})
+
+                elif user_role == "admin" and c.status == "pending_admin":
+                    c.status = "published"
+                    c.save()
+                    return Response({"message": "Content published!", "status": c.status})
+
+                return Response({"error": "Invalid stage or permissions."}, status=403)
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+
+
+# ── 9. VERSION HISTORY ───────────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
+class ContentVersionHistory(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "feedback", "admin", "promote"]
+
+    def get(self, request, content_id):
+        try:
+            c  = Content.objects.get(content_id=content_id)
+            user = request.user
+            is_sme = user.role == "sme" and ContentAssignment.objects.filter(content=c, sme=user).exists()
+            if not (c.author == user or user.role in ["reviewer","admin","exec_approver"] or is_sme):
+                return Response({"error": "Permission denied."}, status=403)
+            versions = ContentVersion.objects.filter(content=c).select_related("changed_by")
+            data = [{
+                "version_id":      str(v.version_id),
+                "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
+                "role": v.changed_by.role if v.changed_by else "N/A",
+                "timestamp": v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "title": v.title,
+                "image_url": v.image_url,
+                "body_preview":v.body[:100] + "...",
+            } for v in versions]
+            return Response({"content_id": str(c.content_id), "title": c.title,
+                             "status": c.status, "history": data})
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+
+
+# ── 10. VIEW SPECIFIC VERSION ────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
+class ContentVersionDetailView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "write", "feedback", "admin"]
+
+    def get(self, request, content_id, version_id):
+        try:
+            c = Content.objects.get(content_id=content_id)
+            v = ContentVersion.objects.get(version_id=version_id, content=c)
+            return Response({
+                "version_id": str(v.version_id),
+                "content_id": str(c.content_id),
+                "title": v.title,
+                "body": v.body,
+                "image_url": v.image_url,
+                "changed_by":v.changed_by.full_name if v.changed_by else "Unknown",
+                "saved_at": v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            })
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+        except ContentVersion.DoesNotExist:
+            return Response({"error": "Version not found."}, status=404)
+
+
+# ── 11. LATEST VERSION ───────────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
+class LatestVersionView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
     required_roles = ["read", "write", "update", "feedback", "admin"]
 
-    def get(self, request, pk):
+    def get(self, request, content_id):
         try:
-            article = Article.objects.get(pk=pk)
-        except Article.DoesNotExist:
-            return Response({"error": "Article not found."}, status=404)
+            c = Content.objects.get(content_id=content_id)
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+        v = ContentVersion.objects.filter(content=c).order_by("-created_at").first()
+        if not v:
+            return Response({"error": "No versions found."}, status=404)
+        return Response({"version_id": str(v.version_id), "content_id": str(c.content_id),
+                         "title": v.title, "body": v.body, "image_url": v.image_url,
+                         "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
+                         "saved_at": v.created_at.strftime("%Y-%m-%d %H:%M:%S")})
 
-        version = ArticleVersion.objects.filter(article=article).order_by('-created_at').first()
 
-        if not version:
-            return Response({"error": "No versions found for this article."}, status=404)
+# ── 12. COMMENT ──────────────────────────────────────────────────────────────
 
-        return Response({
-            "version_id": version.id,
-            "article_id": article.id,
-            "title": version.title,
-            "content": version.content,
-            "image_url": version.image_url,
-            "changed_by": version.changed_by.full_name if version.changed_by else "Unknown",
-            "saved_at": version.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-        })
+@extend_schema(tags=["Content"],
+               request=inline_serializer(name="WriteCommentRequest",
+                                          fields={"comment_text": drf_serializers.CharField()}))
+class WriteComment(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["feedback", "admin"]
+
+    def post(self, request, content_id):
+        text = request.data.get("comment_text", "").strip()
+        if not text:
+            return Response({"error": "comment_text is required."}, status=400)
+        try:
+            with transaction.atomic():
+                c = Content.objects.select_for_update().get(content_id=content_id)
+                if request.user.role == "sme":
+                    if not ContentAssignment.objects.filter(content=c, sme=request.user).exists():
+                        return Response({"error": "Not assigned to this content."}, status=403)
+                c.status= "draft"
+                c.locked_by = None
+                c.locked_at = None
+                c._skip_version = True
+                c.save()
+                latest = ContentVersion.objects.filter(content=c).order_by("-created_at").first()
+                comment = ContentComment.objects.create(content=c, user=request.user,
+                                                        comment_text=text, version=latest)
+                cache.delete(f"content_comments_{content_id}")
+                handle_mentions_and_notifications(text, c, comment, sender=request.user)
+                return Response({"message": "Feedback recorded.", "new_status": c.status})
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+# ── 13. COMMENT HISTORY ──────────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
+class ContentCommentHistoryView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "feedback", "admin", "promote"]
+
+    def get(self, request, content_id):
+        cache_key = f"content_comments_{content_id}"
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            return Response(cached_data)
+        try:
+            c = Content.objects.get(content_id=content_id)
+            version_subquery = ContentVersion.objects.filter(
+                content=c, created_at__lte=OuterRef("created_at")
+            ).order_by("-created_at").values("version_id")[:1]
+            comments = ContentComment.objects.filter(content=c).select_related("user").annotate(
+                detected_version_id=Subquery(version_subquery)
+            ).order_by("created_at")
+            data = [{"comment_id": str(cm.comment_id), "user": cm.user.full_name,
+                     "role": cm.user.role, "text": cm.comment_text,
+                     "timestamp": cm.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                     "version_at_time": str(cm.detected_version_id) if cm.detected_version_id else "Initial Draft"}
+                    for cm in comments]
+            response_data = {"content_title": c.title, "comments": data}
+            cache.set(cache_key, response_data, timeout=600)
+            return Response(response_data)
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+
+
+# ── 14. COMMENT EDIT/DELETE ──────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"],
+               request=inline_serializer(name="CommentEditRequest",
+                                          fields={"comment_text": drf_serializers.CharField()}))
+class CommentEditDelete(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area = "content"
+    required_roles= ["feedback", "admin"]
+
+    def patch(self, request, comment_id):
+        try:
+            comment = ContentComment.objects.get(comment_id=comment_id)
+            if comment.user != request.user:
+                return Response({"error": "You did not write this comment."}, status=403)
+            new_text = request.data.get("comment_text", "").strip()
+            if not new_text:
+                return Response({"error": "comment_text required."}, status=400)
+            comment.comment_text = new_text
+            comment.save()
+            cache.delete(f"content_comments_{comment.content.content_id}")
+            return Response({"message": "Comment updated."})
+        except ContentComment.DoesNotExist:
+            return Response({"error": "Comment not found."}, status=404)
+
+    def delete(self, request, comment_id):
+        try:
+            comment = ContentComment.objects.get(comment_id=comment_id)
+            if comment.user != request.user:
+                return Response({"error": "You can only delete your own comments."}, status=403)
+            content_id = comment.content.content_id
+            comment.delete()
+            cache.delete(f"content_comments_{content_id}")
+            return Response({"message": "Comment removed."})
+        except ContentComment.DoesNotExist:
+            return Response({"error": "Comment not found."}, status=404)

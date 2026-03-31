@@ -1,19 +1,18 @@
 from rest_framework import serializers
-from .models import Article
+from .models import Content, ContentVersion, ContentAssignment, ContentComment
 
 
-class ArticleSerializer(serializers.ModelSerializer):
-    author_name = serializers.CharField(source='author.full_name',    read_only=True)
-    locked_by_name = serializers.CharField(source='locked_by.full_name', read_only=True, default="None")
-    image_url = serializers.SerializerMethodField()
+class ContentSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source="author.full_name", read_only=True)
+    locked_by_name = serializers.CharField(source="locked_by.full_name", read_only=True)
 
     class Meta:
-        model = Article
+        model  = Content
         fields = [
-            'id', 'title', 'content', 'status',
-            'author_name', 'image_url', 'locked_by_name',
-            'created_at', 'updated_at',
+            "content_id", "title", "body", "image",
+            "author", "author_name",
+            "status",
+            "locked_by", "locked_by_name", "locked_at",
+            "created_at", "updated_at",
         ]
-
-    def get_image_url(self, obj):
-        return obj.image.url if obj.image else None
+        read_only_fields = ["content_id", "author", "created_at", "updated_at"]

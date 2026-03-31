@@ -161,6 +161,8 @@ SPECTACULAR_SETTINGS = {
 }
 
 SIMPLE_JWT = {
+    "USER_ID_FIELD": "user_id",
+    "USER_ID_CLAIM": "user_id",
     "ACCESS_TOKEN_LIFETIME":  timedelta(days=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS":  True,
@@ -216,3 +218,15 @@ USE_TZ        = True
 
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# ==============================================================================
+# CELERY CONFIGURATION
+# ==============================================================================
+CELERY_BROKER_URL        = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND    = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+CELERY_ACCEPT_CONTENT    = ["json"]
+CELERY_TASK_SERIALIZER   = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE          = "UTC"
+CELERY_TASK_TRACK_STARTED = True

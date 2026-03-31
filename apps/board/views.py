@@ -2,161 +2,394 @@ import json
 from datetime import datetime
 from django.core.cache import cache
 from django.db import transaction
+from django.core.exceptions import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status, permissions
+from rest_framework import permissions
 from accounts.models import User
 from utils.permissions.base import HasRBACPermission
 from utils.notifications.services import send_task_assignment_email, send_task_transfer_email
-from .models import Task, TaskHistory, Discussion
-from .serializers import TaskSerializer, TaskListSerializer, DiscussionSerializer
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, inline_serializer
-from drf_spectacular.types import OpenApiTypes
+from .models import Campaign, Event, Task, TaskHistory, Discussion
+from .serializers import (
+    CampaignSerializer, EventSerializer,
+    TaskSerializer, TaskListSerializer, DiscussionSerializer,
+)
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
 from rest_framework import serializers as drf_serializers
+from django.core.serializers.json import DjangoJSONEncoder
 
 TASK_LIST_CACHE_KEY = "kanban_all_tasks"
-CACHE_TTL = 60 * 5  # 5 minutes
+CACHE_TTL = 60 * 5
 
 
 def _bust_task_cache():
-    """Invalidate the task list cache whenever data changes."""
     cache.delete(TASK_LIST_CACHE_KEY)
 
 
 # ==============================================================================
-# TASK LIST — GET all / POST create
+# CAMPAIGN VIEWS
 # ==============================================================================
+
+@extend_schema(tags=["Campaign"])
+class CampaignListView(APIView):
+    """GET all campaigns / POST create campaign."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def get(self, request):
+        campaigns  = Campaign.objects.select_related("created_by").all()
+        serializer = CampaignSerializer(campaigns, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        title  = request.data.get("title", "").strip()
+        description = request.data.get("description", "").strip()
+        start_date =request.data.get("start_date")
+        end_date = request.data.get("end_date")
+        max_hierarchy_level = int(request.data.get("max_hierarchy_level", 2))
+
+        if not title:
+            return Response({"error": "title is required."}, status=400)
+        if max_hierarchy_level < 1:
+            return Response({"error": "max_hierarchy_level must be at least 1."}, status=400)
+
+        campaign = Campaign.objects.create(
+            title  = title,
+            description = description,
+            start_date = start_date or None,
+            end_date= end_date   or None,
+            created_by = request.user,
+            max_hierarchy_level = max_hierarchy_level,
+        )
+        return Response(CampaignSerializer(campaign).data, status=201)
+
+
+@extend_schema(tags=["Campaign"])
+class CampaignDetailView(APIView):
+    """GET / PATCH / DELETE a single campaign."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def _get(self, campaign_id):
+        try:
+            return Campaign.objects.get(campaign_id=campaign_id)
+        except Campaign.DoesNotExist:
+            return None
+
+    def get(self, request, campaign_id):
+        c = self._get(campaign_id)
+        if not c:
+            return Response({"error": "Campaign not found."}, status=404)
+        return Response(CampaignSerializer(c).data)
+
+    def patch(self, request, campaign_id):
+        c = self._get(campaign_id)
+        if not c:
+            return Response({"error": "Campaign not found."}, status=404)
+        if request.user.role != "admin" and c.created_by != request.user:
+            return Response({"error": "Only creator or admin can edit."}, status=403)
+
+        for field in ["title", "description", "start_date", "end_date", "max_hierarchy_level"]:
+            if field in request.data:
+                setattr(c, field, request.data[field])
+        c.save()
+        return Response(CampaignSerializer(c).data)
+
+    def delete(self, request, campaign_id):
+        c = self._get(campaign_id)
+        if not c:
+            return Response({"error": "Campaign not found."}, status=404)
+        if request.user.role != "admin" and c.created_by != request.user:
+            return Response({"error": "Only creator or admin can delete."}, status=403)
+        c.delete()
+        _bust_task_cache()
+        return Response({"message": "Campaign deleted."})
+
+
+@extend_schema(tags=["Campaign"])
+class CampaignEventsView(APIView):
+    """GET all events under a campaign."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def get(self, request, campaign_id):
+        try:
+            campaign = Campaign.objects.get(campaign_id=campaign_id)
+        except Campaign.DoesNotExist:
+            return Response({"error": "Campaign not found."}, status=404)
+        events = Event.objects.filter(campaign=campaign).select_related("created_by")
+        serializer = EventSerializer(events, many=True)
+        return Response({"campaign": campaign.title, "events": serializer.data})
+
+
+@extend_schema(tags=["Campaign"])
+class CampaignTasksView(APIView):
+    """GET all root tasks (no parent_task) directly under a campaign."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def get(self, request, campaign_id):
+        try:
+            campaign = Campaign.objects.get(campaign_id=campaign_id)
+        except Campaign.DoesNotExist:
+            return Response({"error": "Campaign not found."}, status=404)
+
+        tasks = Task.objects.filter(
+            campaign=campaign, parent_task__isnull=True
+        ).select_related("assigned_by", "assigned_to", "event")
+        serializer = TaskListSerializer(tasks, many=True)
+        return Response({"campaign": campaign.title, "tasks": serializer.data})
+
+
+# ==============================================================================
+# EVENT VIEWS
+# ==============================================================================
+
+@extend_schema(tags=["Event"])
+class EventListView(APIView):
+    """GET all events / POST create event."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def get(self, request):
+        events = Event.objects.select_related("campaign", "created_by").all()
+        serializer = EventSerializer(events, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        title= request.data.get("title", "").strip()
+        description = request.data.get("description", "").strip()
+        campaign_id = request.data.get("campaign_id")
+        start_date  = request.data.get("start_date")
+        end_date = request.data.get("end_date")
+
+        if not title:
+            return Response({"error": "title is required."}, status=400)
+        if not campaign_id:
+            return Response({"error": "campaign_id is required. Events must belong to a campaign."}, status=400)
+
+        try:
+            campaign = Campaign.objects.get(campaign_id=campaign_id)
+        except Campaign.DoesNotExist:
+            return Response({"error": "Campaign not found."}, status=404)
+
+        event = Event.objects.create(
+            campaign= campaign,
+            title = title,
+            description = description,
+            start_date = start_date or None,
+            end_date= end_date   or None,
+            created_by = request.user,
+        )
+        return Response(EventSerializer(event).data, status=201)
+
+
+@extend_schema(tags=["Event"])
+class EventDetailView(APIView):
+    """GET / PATCH / DELETE a single event."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def _get(self, event_id):
+        try:
+            return Event.objects.select_related("campaign", "created_by").get(event_id=event_id)
+        except Event.DoesNotExist:
+            return None
+
+    def get(self, request, event_id):
+        e = self._get(event_id)
+        if not e:
+            return Response({"error": "Event not found."}, status=404)
+        return Response(EventSerializer(e).data)
+
+    def patch(self, request, event_id):
+        e = self._get(event_id)
+        if not e:
+            return Response({"error": "Event not found."}, status=404)
+        if request.user.role != "admin" and e.created_by != request.user:
+            return Response({"error": "Only creator or admin can edit."}, status=403)
+        for field in ["title", "description", "start_date", "end_date"]:
+            if field in request.data:
+                setattr(e, field, request.data[field])
+        e.save()
+        return Response(EventSerializer(e).data)
+
+    def delete(self, request, event_id):
+        e = self._get(event_id)
+        if not e:
+            return Response({"error": "Event not found."}, status=404)
+        if request.user.role != "admin" and e.created_by != request.user:
+            return Response({"error": "Only creator or admin can delete."}, status=403)
+        e.delete()
+        _bust_task_cache()
+        return Response({"message": "Event deleted."})
+
+
+@extend_schema(tags=["Event"])
+class EventTasksView(APIView):
+    """GET all tasks under a specific event."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def get(self, request, event_id):
+        try:
+            event = Event.objects.select_related("campaign").get(event_id=event_id)
+        except Event.DoesNotExist:
+            return Response({"error": "Event not found."}, status=404)
+
+        tasks = Task.objects.filter(
+            event=event, parent_task__isnull=True
+        ).select_related("assigned_by", "assigned_to")
+        serializer = TaskListSerializer(tasks, many=True)
+        return Response({
+            "event": event.title,
+            "campaign": event.campaign.title,
+            "tasks": serializer.data,
+        })
+
+
+# ==============================================================================
+# TASK VIEWS
+# ==============================================================================
+
 @extend_schema(
-    tags=['Board'],
+    tags=["Board"],
     request=inline_serializer(
-        name='CreateTaskRequest',
+        name="CreateTaskRequest",
         fields={
-            'title':          drf_serializers.CharField(),
-            'description':    drf_serializers.CharField(required=False),
-            'assigned_to':    drf_serializers.IntegerField(help_text='User ID to assign task to'),
-            'tags':           drf_serializers.CharField(required=False, help_text='Comma-separated e.g. design,ux,q2'),
-            'priority':       drf_serializers.ChoiceField(choices=['low', 'medium', 'high'], required=False),
-            'marketing_type': drf_serializers.CharField(required=False, help_text='e.g. Social Media, Blog'),
-            'due_date':       drf_serializers.DateField(required=False, help_text='YYYY-MM-DD'),
+            "title": drf_serializers.CharField(),
+            "description": drf_serializers.CharField(required=False),
+            "campaign_id": drf_serializers.UUIDField(help_text="Required. UUID of the campaign."),
+            "event_id": drf_serializers.UUIDField(required=False, help_text="Optional. UUID of the event."),
+            "parent_task_id": drf_serializers.UUIDField(required=False, help_text="Optional. UUID of parent task for subtask creation."),
+            "assigned_to":drf_serializers.UUIDField(help_text="UUID of user to assign task to"),
+            "tags": drf_serializers.CharField(required=False),
+            "priority": drf_serializers.ChoiceField(choices=["low","medium","high"], required=False),
+            "marketing_type": drf_serializers.CharField(required=False),
+            "due_date": drf_serializers.DateField(required=False),
         }
     )
 )
 class TaskListView(APIView):
-    """
-    GET  — list all tasks (cached in Redis 5 min).
-    POST — create a new task and assign it to any user.
-    """
+    """GET all tasks (cached) / POST create task."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
         cached = cache.get(TASK_LIST_CACHE_KEY)
         if cached:
             return Response(json.loads(cached))
-
-        tasks      = Task.objects.select_related('assigned_by', 'assigned_to', 'last_transferred_by').all()
+        tasks = Task.objects.select_related(
+            "assigned_by", "assigned_to", "last_transferred_by", "campaign", "event", "parent_task"
+        ).all()
         serializer = TaskListSerializer(tasks, many=True)
-        data       = serializer.data
-
-        cache.set(TASK_LIST_CACHE_KEY, json.dumps(data), CACHE_TTL)
+        data = serializer.data
+        cache.set(TASK_LIST_CACHE_KEY, json.dumps(data, cls=DjangoJSONEncoder), CACHE_TTL)
         return Response(data)
 
     def post(self, request):
-        title          = request.data.get('title', '').strip()
-        description    = request.data.get('description', '').strip()
-        assigned_to_id = request.data.get('assigned_to')
-
-        # New optional fields on creation
-        tags           = request.data.get('tags', '').strip()
-        priority       = request.data.get('priority', 'medium').strip()
-        marketing_type = request.data.get('marketing_type', '').strip()
-        due_date       = request.data.get('due_date', None)
+        title = request.data.get("title", "").strip()
+        description = request.data.get("description", "").strip()
+        campaign_id= request.data.get("campaign_id")
+        event_id = request.data.get("event_id")
+        parent_task_id = request.data.get("parent_task_id")
+        assigned_to_id = request.data.get("assigned_to")
+        tags= request.data.get("tags", "").strip()
+        priority= request.data.get("priority", "medium").strip()
+        marketing_type = request.data.get("marketing_type", "").strip()
+        due_date = request.data.get("due_date")
 
         if not title:
-            return Response({"error": "Title is required."}, status=400)
+            return Response({"error": "title is required."}, status=400)
+        if not campaign_id:
+            return Response({"error": "campaign_id is required. Every task must belong to a campaign."}, status=400)
         if not assigned_to_id:
-            return Response({"error": "assigned_to (user id) is required."}, status=400)
-
-        # Validate priority
-        valid_priorities = [p[0] for p in Task.PRIORITY_CHOICES]
-        if priority not in valid_priorities:
-            return Response({"error": f"Invalid priority. Choose from: {valid_priorities}"}, status=400)
-
-        # Validate due_date format if provided
-        if due_date:
-            try:
-                datetime.strptime(due_date, '%Y-%m-%d')
-            except ValueError:
-                return Response({"error": "due_date must be in YYYY-MM-DD format."}, status=400)
+            return Response({"error": "assigned_to (user UUID) is required."}, status=400)
 
         try:
-            assignee = User.objects.get(id=assigned_to_id)
+            campaign = Campaign.objects.get(campaign_id=campaign_id)
+        except Campaign.DoesNotExist:
+            return Response({"error": "Campaign not found."}, status=404)
+
+        event = None
+        if event_id:
+            try:
+                event = Event.objects.get(event_id=event_id, campaign=campaign)
+            except Event.DoesNotExist:
+                return Response({"error": "Event not found or does not belong to this campaign."}, status=404)
+
+        parent_task = None
+        if parent_task_id:
+            try:
+                parent_task = Task.objects.get(task_id=parent_task_id, campaign=campaign)
+            except Task.DoesNotExist:
+                return Response({"error": "Parent task not found or does not belong to this campaign."}, status=404)
+
+        try:
+            assignee = User.objects.get(user_id=assigned_to_id)
         except User.DoesNotExist:
             return Response({"error": "Assigned user not found."}, status=404)
 
-        with transaction.atomic():
-            task = Task.objects.create(
-                title          = title,
-                description    = description,
-                tags           = tags,
-                priority       = priority,
-                marketing_type = marketing_type,
-                due_date       = due_date or None,
-                assigned_by    = request.user,
-                assigned_to    = assignee,
-                status         = 'to_do',
-            )
-            TaskHistory.objects.create(
-                task         = task,
-                action       = 'created',
-                performed_by = request.user,
-                detail       = f"Task created and assigned to {assignee.full_name} ({assignee.email})",
-            )
+        try:
+            with transaction.atomic():
+                task = Task(
+                    title  = title,
+                    description = description,
+                    campaign = campaign,
+                    event= event,
+                    parent_task = parent_task,
+                    tags = tags,
+                    priority = priority,
+                    marketing_type = marketing_type,
+                    due_date = due_date or None,
+                    assigned_by = request.user,
+                    assigned_to = assignee,
+                    status = "to_do",
+                )
+                task.full_clean()  # runs clean() for hierarchy validation
+                task.save()
+
+                TaskHistory.objects.create(
+                    task = task,
+                    action  = "created",
+                    performed_by = request.user,
+                    detail = f"Task created and assigned to {assignee.full_name} ({assignee.email})",
+                )
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=400)
 
         _bust_task_cache()
-
         send_task_assignment_email(
-            assignee_email   = assignee.email,
-            assignee_name    = assignee.full_name,
-            task_title       = task.title,
+            assignee_email = assignee.email,
+            assignee_name = assignee.full_name,
+            task_title = task.title,
             assigned_by_name = request.user.full_name,
         )
-
         return Response(TaskSerializer(task).data, status=201)
 
 
-# ==============================================================================
-# TASK DETAIL — GET / DELETE
-# ==============================================================================
-@extend_schema(
-    tags=['Board'],
-    request=inline_serializer(
-        name='UpdateTaskStatusRequest',
-        fields={
-            'status': drf_serializers.ChoiceField(
-                choices=['to_do', 'in_progress', 'completed', 'blocked', 'approved'],
-                help_text='New status for the task — only current assignee or admin can change',
-            ),
-        }
-    )
-)
+@extend_schema(tags=["Board"])
 class TaskDetailView(APIView):
-    """
-    GET    — full task detail including discussion and history.
-    PATCH  — update STATUS only (to_do / in_progress / completed / blocked / approved).
-             Only the current assignee (or admin) can change the status.
-    DELETE — only the original creator (assigned_by) or admin can delete.
-    """
+    """GET full task detail / DELETE task."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
 
+    #for queery optimisation
     def _get_task(self, task_id):
         try:
             return Task.objects.select_related(
-                'assigned_by', 'assigned_to', 'last_transferred_by'
-            ).prefetch_related('discussion__author', 'history__performed_by').get(id=task_id)
+                "assigned_by", "assigned_to", "last_transferred_by",
+                "campaign", "event", "parent_task",
+            ).prefetch_related("discussion__author", "history__performed_by").get(task_id=task_id)
         except Task.DoesNotExist:
             return None
 
@@ -166,147 +399,79 @@ class TaskDetailView(APIView):
             return Response({"error": "Task not found."}, status=404)
         return Response(TaskSerializer(task).data)
 
-    # def patch(self, request, task_id):
-    #     """Change status. Only the current assignee (or admin) can do this."""
-    #     task = self._get_task(task_id)
-    #     if not task:
-    #         return Response({"error": "Task not found."}, status=404)
-
-    #     if request.user.role != 'admin' and task.assigned_to != request.user:
-    #         return Response(
-    #             {"error": "Only the current assignee can update the task status."},
-    #             status=403
-    #         )
-
-    #     new_status     = request.data.get('status', '').strip()
-    #     valid_statuses = [s[0] for s in Task.STATUS_CHOICES]
-
-    #     if new_status not in valid_statuses:
-    #         return Response(
-    #             {"error": f"Invalid status. Choose from: {valid_statuses}"},
-    #             status=400
-    #         )
-
-    #     old_status    = task.status
-    #     task.status   = new_status
-    #     task.save()
-
-    #     TaskHistory.objects.create(
-    #         task         = task,
-    #         action       = 'stage_changed',
-    #         performed_by = request.user,
-    #         detail       = f"Status changed from '{old_status}' to '{new_status}'",
-    #     )
-
-    #     _bust_task_cache()
-    #     return Response(TaskSerializer(task).data)
-
     def delete(self, request, task_id):
-        """Only the original creator or admin can delete a task."""
         task = self._get_task(task_id)
         if not task:
             return Response({"error": "Task not found."}, status=404)
-
-        if request.user.role != 'admin' and task.assigned_by != request.user:
-            return Response(
-                {"error": "Only the original task creator or an admin can delete this task."},
-                status=403
-            )
-
+        if request.user.role != "admin" and task.assigned_by != request.user:
+            return Response({"error": "Only the original creator or admin can delete."}, status=403)
         task.delete()
         _bust_task_cache()
-        return Response({"message": "Task deleted."}, status=200)
+        return Response({"message": "Task deleted."})
 
 
-# ==============================================================================
-# TASK UPDATE — PATCH metadata (tags, priority, marketing_type, due_date, title, description)
-# ==============================================================================
-@extend_schema(
-    tags=['Board'],
-    request=inline_serializer(
-        name='UpdateTaskMetadataRequest',
-        fields={
-            'title':          drf_serializers.CharField(required=False),
-            'description':    drf_serializers.CharField(required=False),
-            'tags':           drf_serializers.CharField(required=False, help_text='Comma-separated e.g. design,ux'),
-            'priority':       drf_serializers.ChoiceField(choices=['low', 'medium', 'high'], required=False),
-            'marketing_type': drf_serializers.CharField(required=False),
-            'due_date':       drf_serializers.DateField(required=False, help_text='YYYY-MM-DD'),
-        }
-    )
-)
-class TaskUpdateView(APIView):
-    """
-    PATCH /api/board/tasks/<task_id>/update/
-
-    Edits task metadata. Only the original creator (assigned_by),
-    the person who last transferred it (last_transferred_by), or admin can do this.
-
-    Editable fields:
-        title           — task title
-        description     — task description
-        tags            — comma-separated string e.g. "design,ux,q2"
-        priority        — low | medium | high
-        marketing_type  — free text e.g. "Social Media", "Blog", "Email Campaign"
-        due_date        — YYYY-MM-DD format
-
-    Status changes go through TaskDetailView PATCH — not here.
-    Every successful update is logged in TaskHistory.
-    """
+@extend_schema(tags=["Board"])
+class TaskSubtasksView(APIView):
+    """GET all subtasks of a task."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def get(self, request, task_id):
+        try:
+            task = Task.objects.select_related("campaign").get(task_id=task_id)
+        except Task.DoesNotExist:
+            return Response({"error": "Task not found."}, status=404)
+
+        subtasks   = Task.objects.filter(parent_task=task).select_related("assigned_by", "assigned_to")
+        serializer = TaskListSerializer(subtasks, many=True)
+        return Response({
+            "parent_task": task.title,
+            "depth": task.get_depth(),
+            "max_allowed_depth": task.campaign.max_hierarchy_level,
+            "subtasks":    serializer.data,
+        })
+
+
+@extend_schema(tags=["Board"])
+class TaskUpdateView(APIView):
+    """PATCH task metadata."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "board"
+    required_roles = ["write", "update", "admin"]
 
     def patch(self, request, task_id):
         try:
-            task = Task.objects.select_related('assigned_by', 'last_transferred_by').get(id=task_id)
+            task = Task.objects.select_related("assigned_by", "last_transferred_by").get(task_id=task_id)
         except Task.DoesNotExist:
             return Response({"error": "Task not found."}, status=404)
 
         user = request.user
-
-        # Only original creator, last transferrer, or admin can edit metadata
         can_edit = (
-            user.role == 'admin' or
+            user.role == "admin" or
             task.assigned_by == user or
             task.last_transferred_by == user
         )
         if not can_edit:
-            return Response(
-                {"error": "Only the task creator, last transferrer, or admin can edit task details."},
-                status=403
-            )
+            return Response({"error": "Only the task creator, last transferrer, or admin can edit."}, status=403)
 
-        editable_fields = ['title', 'description', 'tags', 'priority', 'marketing_type', 'due_date']
-        changed = []
+        editable = ["title", "description", "tags", "priority", "marketing_type", "due_date", "status"]
+        changed  = []
 
-        for field in editable_fields:
+        for field in editable:
             if field not in request.data:
                 continue
-
             new_val = request.data[field]
-
-            # Validate priority
-            if field == 'priority':
-                valid = [p[0] for p in Task.PRIORITY_CHOICES]
-                if new_val not in valid:
-                    return Response(
-                        {"error": f"Invalid priority. Choose from: {valid}"},
-                        status=400
-                    )
-
-            # Validate due_date format
-            if field == 'due_date' and new_val:
+            if field == "priority" and new_val not in [p[0] for p in Task.PRIORITY_CHOICES]:
+                return Response({"error": f"Invalid priority."}, status=400)
+            if field == "status" and new_val not in [s[0] for s in Task.STATUS_CHOICES]:
+                return Response({"error": f"Invalid status."}, status=400)
+            if field == "due_date" and new_val:
                 try:
-                    datetime.strptime(new_val, '%Y-%m-%d')
+                    datetime.strptime(new_val, "%Y-%m-%d")
                 except ValueError:
-                    return Response(
-                        {"error": "due_date must be in YYYY-MM-DD format."},
-                        status=400
-                    )
-
-            # Validate title not empty
-            if field == 'title' and not str(new_val).strip():
+                    return Response({"error": "due_date must be YYYY-MM-DD."}, status=400)
+            if field == "title" and not str(new_val).strip():
                 return Response({"error": "Title cannot be empty."}, status=400)
 
             old_val = getattr(task, field)
@@ -315,63 +480,36 @@ class TaskUpdateView(APIView):
             setattr(task, field, new_val)
 
         if not changed:
-            return Response({"message": "No changes detected.", "task": TaskSerializer(task).data})
+            return Response({"message": "No changes.", "task": TaskSerializer(task).data})
 
         task.save()
-
-        TaskHistory.objects.create(
-            task         = task,
-            action       = 'updated',
-            performed_by = user,
-            detail       = " | ".join(changed),
-        )
-
+        TaskHistory.objects.create(task=task, action="updated", performed_by=user, detail=" | ".join(changed))
         _bust_task_cache()
         return Response(TaskSerializer(task).data)
 
 
-# ==============================================================================
-# TRANSFER TASK
-# ==============================================================================
-@extend_schema(
-    tags=['Board'],
-    request=inline_serializer(
-        name='TransferTaskRequest',
-        fields={
-            'transfer_to': drf_serializers.IntegerField(help_text='User ID to transfer task to'),
-        }
-    )
-)
+@extend_schema(tags=["Board"])
 class TransferTaskView(APIView):
-    """
-    POST /api/board/tasks/<task_id>/transfer/
-    Body: { "transfer_to": <user_id> }
-
-    The current assignee (or admin) can transfer the task to any other user.
-    Records the transfer in TaskHistory and updates last_transferred_by.
-    """
+    """POST transfer task to another user."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["write", "update", "admin"]
 
     def post(self, request, task_id):
         try:
-            task = Task.objects.select_related('assigned_to', 'assigned_by').get(id=task_id)
+            task = Task.objects.select_related("assigned_to", "assigned_by").get(task_id=task_id)
         except Task.DoesNotExist:
             return Response({"error": "Task not found."}, status=404)
 
-        if request.user.role != 'admin' and task.assigned_to != request.user:
-            return Response(
-                {"error": "Only the current assignee can transfer this task."},
-                status=403
-            )
+        if request.user.role != "admin" and task.assigned_to != request.user:
+            return Response({"error": "Only the current assignee can transfer."}, status=403)
 
-        transfer_to_id = request.data.get('transfer_to')
+        transfer_to_id = request.data.get("transfer_to")
         if not transfer_to_id:
-            return Response({"error": "transfer_to (user id) is required."}, status=400)
+            return Response({"error": "transfer_to (user UUID) is required."}, status=400)
 
         try:
-            new_assignee = User.objects.get(id=transfer_to_id)
+            new_assignee = User.objects.get(user_id=transfer_to_id)
         except User.DoesNotExist:
             return Response({"error": "Target user not found."}, status=404)
 
@@ -379,337 +517,186 @@ class TransferTaskView(APIView):
             return Response({"error": "Task is already assigned to this user."}, status=400)
 
         old_assignee = task.assigned_to
-
         with transaction.atomic():
             task.last_transferred_by = request.user
             task.assigned_to         = new_assignee
             task.save()
-
             TaskHistory.objects.create(
-                task         = task,
-                action       = 'transferred',
+                task = task,
+                action = "transferred",
                 performed_by = request.user,
-                detail       = (
-                    f"Transferred from {old_assignee.full_name} ({old_assignee.email}) "
-                    f"to {new_assignee.full_name} ({new_assignee.email})"
-                ),
+                detail = f"Transferred from {old_assignee.full_name} to {new_assignee.full_name}",
             )
 
         _bust_task_cache()
-
         send_task_transfer_email(
-            new_assignee_email  = new_assignee.email,
-            new_assignee_name   = new_assignee.full_name,
-            task_title          = task.title,
+            new_assignee_email= new_assignee.email,
+            new_assignee_name = new_assignee.full_name,
+            task_title= task.title,
             transferred_by_name = request.user.full_name,
         )
-
-        return Response({
-            "message": f"Task transferred to {new_assignee.full_name}.",
-            "task":    TaskSerializer(task).data,
-        })
+        return Response({"message": f"Transferred to {new_assignee.full_name}.", "task": TaskSerializer(task).data})
 
 
-# ==============================================================================
-# FILTER & SEARCH
-# ==============================================================================
 @extend_schema(
-    tags=['Board'],
+    tags=["Board"],
     parameters=[
-        OpenApiParameter(
-            name='search',
-            type=OpenApiTypes.STR,
-            location=OpenApiParameter.QUERY,
-            description='Search tasks by title keyword (case-insensitive)',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='status',
-            type=OpenApiTypes.STR,
-            location=OpenApiParameter.QUERY,
-            description='Filter by status: to_do | in_progress | completed | blocked | approved',
-            required=False,
-            enum=['to_do', 'in_progress', 'completed', 'blocked', 'approved'],
-        ),
-        OpenApiParameter(
-            name='priority',
-            type=OpenApiTypes.STR,
-            location=OpenApiParameter.QUERY,
-            description='Filter by priority: low | medium | high',
-            required=False,
-            enum=['low', 'medium', 'high'],
-        ),
-        OpenApiParameter(
-            name='marketing_type',
-            type=OpenApiTypes.STR,
-            location=OpenApiParameter.QUERY,
-            description='Filter by marketing type (contains match, e.g. Social Media)',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='assigned_to',
-            type=OpenApiTypes.INT,
-            location=OpenApiParameter.QUERY,
-            description='Filter by assigned user ID',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='tags',
-            type=OpenApiTypes.STR,
-            location=OpenApiParameter.QUERY,
-            description='Filter by tag name (partial match, e.g. design)',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='due_date',
-            type=OpenApiTypes.DATE,
-            location=OpenApiParameter.QUERY,
-            description='Filter by exact due date (YYYY-MM-DD)',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='due_before',
-            type=OpenApiTypes.DATE,
-            location=OpenApiParameter.QUERY,
-            description='Filter tasks due on or before this date (YYYY-MM-DD)',
-            required=False,
-        ),
-        OpenApiParameter(
-            name='due_after',
-            type=OpenApiTypes.DATE,
-            location=OpenApiParameter.QUERY,
-            description='Filter tasks due on or after this date (YYYY-MM-DD)',
-            required=False,
-        ),
+        OpenApiParameter("search", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("status", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["to_do","in_progress","completed","blocked"]),
+        OpenApiParameter("priority", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["low","medium","high"]),
+        OpenApiParameter("campaign_id", OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by campaign UUID"),
+        OpenApiParameter("event_id", OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by event UUID"),
+        OpenApiParameter("assigned_to",OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by assigned user UUID"),
+        OpenApiParameter("marketing_type", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("tags",OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("due_date", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("due_before", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("due_after", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("root_only",OpenApiTypes.BOOL, OpenApiParameter.QUERY, required=False, description="If true, return only root tasks (no subtasks)"),
     ]
 )
 class TaskFilterSearchView(APIView):
-    """
-    GET /api/board/tasks/filter/
-
-    All query params are optional and fully combinable.
-
-    ?search=<keyword>          searches title (case-insensitive contains)
-    ?status=<status>           to_do | in_progress | completed | blocked | approved
-    ?priority=<priority>       low | medium | high
-    ?marketing_type=<text>     case-insensitive contains match
-    ?assigned_to=<user_id>     filter by assigned user ID
-    ?tags=<tag>                tasks containing this tag in the comma-separated tags field
-    ?due_date=<YYYY-MM-DD>     exact due date match
-    ?due_before=<YYYY-MM-DD>   tasks due on or before this date
-    ?due_after=<YYYY-MM-DD>    tasks due on or after this date
-
-    Response includes applied filters and a count of matching tasks.
-    """
+    """Filterable task list with campaign/event/hierarchy filters."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
-        qs = Task.objects.select_related('assigned_by', 'assigned_to', 'last_transferred_by')
+        qs = Task.objects.select_related(
+            "assigned_by", "assigned_to", "last_transferred_by", "campaign", "event", "parent_task"
+        )
 
-        # ── Search by title ───────────────────────────────────────────────────
-        search = request.query_params.get('search', '').strip()
+        search = request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(title__icontains=search)
 
-        # ── Filter by status ──────────────────────────────────────────────────
-        status_param = request.query_params.get('status', '').strip()
+        status_param = request.query_params.get("status", "").strip()
         if status_param:
-            valid_statuses = [s[0] for s in Task.STATUS_CHOICES]
-            if status_param not in valid_statuses:
-                return Response(
-                    {"error": f"Invalid status. Choose from: {valid_statuses}"},
-                    status=400
-                )
+            if status_param not in [s[0] for s in Task.STATUS_CHOICES]:
+                return Response({"error": "Invalid status."}, status=400)
             qs = qs.filter(status=status_param)
 
-        # ── Filter by priority ────────────────────────────────────────────────
-        priority_param = request.query_params.get('priority', '').strip()
+        priority_param = request.query_params.get("priority", "").strip()
         if priority_param:
-            valid_priorities = [p[0] for p in Task.PRIORITY_CHOICES]
-            if priority_param not in valid_priorities:
-                return Response(
-                    {"error": f"Invalid priority. Choose from: {valid_priorities}"},
-                    status=400
-                )
+            if priority_param not in [p[0] for p in Task.PRIORITY_CHOICES]:
+                return Response({"error": "Invalid priority."}, status=400)
             qs = qs.filter(priority=priority_param)
 
-        # ── Filter by marketing_type (contains) ───────────────────────────────
-        mtype = request.query_params.get('marketing_type', '').strip()
+        campaign_id = request.query_params.get("campaign_id", "").strip()
+        if campaign_id:
+            qs = qs.filter(campaign__campaign_id=campaign_id)
+
+        event_id = request.query_params.get("event_id", "").strip()
+        if event_id:
+            qs = qs.filter(event__event_id=event_id)
+
+        assigned_to = request.query_params.get("assigned_to", "").strip()
+        if assigned_to:
+            qs = qs.filter(assigned_to__user_id=assigned_to)
+
+        mtype = request.query_params.get("marketing_type", "").strip()
         if mtype:
             qs = qs.filter(marketing_type__icontains=mtype)
 
-        # ── Filter by assigned user ───────────────────────────────────────────
-        assigned_to = request.query_params.get('assigned_to', '').strip()
-        if assigned_to:
-            try:
-                qs = qs.filter(assigned_to__id=int(assigned_to))
-            except ValueError:
-                return Response({"error": "assigned_to must be a user ID (integer)."}, status=400)
-
-        # ── Filter by tag ─────────────────────────────────────────────────────
-        tag = request.query_params.get('tags', '').strip()
+        tag = request.query_params.get("tags", "").strip()
         if tag:
             qs = qs.filter(tags__icontains=tag)
 
-        # ── Filter by due_date exact ──────────────────────────────────────────
-        due_date = request.query_params.get('due_date', '').strip()
+        due_date = request.query_params.get("due_date", "").strip()
         if due_date:
             qs = qs.filter(due_date=due_date)
 
-        # ── Filter by due_before ──────────────────────────────────────────────
-        due_before = request.query_params.get('due_before', '').strip()
+        due_before = request.query_params.get("due_before", "").strip()
         if due_before:
             qs = qs.filter(due_date__lte=due_before)
 
-        # ── Filter by due_after ───────────────────────────────────────────────
-        due_after = request.query_params.get('due_after', '').strip()
+        due_after = request.query_params.get("due_after", "").strip()
         if due_after:
             qs = qs.filter(due_date__gte=due_after)
 
+        root_only = request.query_params.get("root_only", "").lower()
+        if root_only in ("true", "1", "yes"):
+            qs = qs.filter(parent_task__isnull=True)
+
         serializer = TaskListSerializer(qs, many=True)
-        return Response({
-            "count": qs.count(),
-            "filters_applied": {
-                "search":         search         or None,
-                "status":         status_param   or None,
-                "priority":       priority_param or None,
-                "marketing_type": mtype          or None,
-                "assigned_to":    assigned_to    or None,
-                "tags":           tag            or None,
-                "due_date":       due_date       or None,
-                "due_before":     due_before     or None,
-                "due_after":      due_after      or None,
-            },
-            "results": serializer.data,
-        })
+        return Response({"count": qs.count(), "results": serializer.data})
 
 
-# ==============================================================================
-# FILTERED VIEWS (existing — kept exactly as before)
-# ==============================================================================
-@extend_schema(tags=['Board'])
+@extend_schema(tags=["Board"])
 class MyTasksView(APIView):
-    """GET — returns only tasks currently assigned to the logged-in user."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
-        tasks      = Task.objects.filter(assigned_to=request.user).select_related('assigned_by', 'assigned_to')
-        serializer = TaskListSerializer(tasks, many=True)
-        return Response(serializer.data)
+        tasks = Task.objects.filter(assigned_to=request.user).select_related(
+            "assigned_by", "assigned_to", "campaign", "event"
+        )
+        return Response(TaskListSerializer(tasks, many=True).data)
 
 
-@extend_schema(tags=['Board'])
+@extend_schema(tags=["Board"])
 class TasksByUserView(APIView):
-    """
-    GET /api/board/tasks/user/<user_id>/
-    Returns all tasks assigned to a specific user. Anyone can view.
-    """
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, user_id):
         try:
-            target_user = User.objects.get(id=user_id)
+            target = User.objects.get(user_id=user_id)
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=404)
-
-        tasks      = Task.objects.filter(assigned_to=target_user).select_related('assigned_by', 'assigned_to')
-        serializer = TaskListSerializer(tasks, many=True)
+        tasks = Task.objects.filter(assigned_to=target).select_related("assigned_by", "assigned_to", "campaign", "event")
         return Response({
-            "user":  {"id": target_user.id, "full_name": target_user.full_name, "email": target_user.email},
-            "tasks": serializer.data,
+            "user":  {"user_id": str(target.user_id), "full_name": target.full_name},
+            "tasks": TaskListSerializer(tasks, many=True).data,
         })
-
-
-@extend_schema(tags=['Board'])
-class TasksByStageView(APIView):
-    """
-    GET /api/board/tasks/stage/<stage>/
-    Kept for backwards compatibility.
-    Now supports all 5 statuses: to_do | in_progress | completed | blocked | approved
-    """
-    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
-
-    def get(self, request, stage):
-        valid_statuses = [s[0] for s in Task.STATUS_CHOICES]
-        if stage not in valid_statuses:
-            return Response({"error": f"Invalid status. Choose from: {valid_statuses}"}, status=400)
-
-        tasks      = Task.objects.filter(status=stage).select_related('assigned_by', 'assigned_to')
-        serializer = TaskListSerializer(tasks, many=True)
-        return Response(serializer.data)
 
 
 # ==============================================================================
 # DISCUSSION
 # ==============================================================================
-@extend_schema(
-    tags=['Board'],
-    request=inline_serializer(
-        name='PostDiscussionRequest',
-        fields={
-            'message': drf_serializers.CharField(
-                help_text='Comment message. Supports @[Full Name](user_id) mention format.'
-            ),
-        }
-    )
-)
+
+@extend_schema(tags=["Board"])
 class DiscussionView(APIView):
-    """
-    GET  — retrieve all comments on a task.
-    POST — post a new comment. Anyone with board access can comment.
-    """
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['read', 'write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, task_id):
         try:
-            task = Task.objects.get(id=task_id)
+            task = Task.objects.get(task_id=task_id)
         except Task.DoesNotExist:
             return Response({"error": "Task not found."}, status=404)
-
-        comments   = Discussion.objects.filter(task=task).select_related('author')
+        comments = Discussion.objects.filter(task=task).select_related("author")
         serializer = DiscussionSerializer(comments, many=True)
         return Response(serializer.data)
 
     def post(self, request, task_id):
         try:
-            task = Task.objects.get(id=task_id)
+            task = Task.objects.get(task_id=task_id)
         except Task.DoesNotExist:
             return Response({"error": "Task not found."}, status=404)
-
-        message = request.data.get('message', '').strip()
+        message = request.data.get("message", "").strip()
         if not message:
             return Response({"error": "Message cannot be empty."}, status=400)
-
-        comment    = Discussion.objects.create(task=task, author=request.user, message=message)
-        serializer = DiscussionSerializer(comment)
+        comment = Discussion.objects.create(task=task, author=request.user, message=message)
+        serializer= DiscussionSerializer(comment)
         return Response(serializer.data, status=201)
 
 
-@extend_schema(tags=['Board'])
+@extend_schema(tags=["Board"])
 class DiscussionDeleteView(APIView):
-    """DELETE — only the comment author or admin can delete a comment."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area      = 'board'
-    required_roles     = ['write', 'update', 'admin']
+    required_area  = "board"
+    required_roles = ["write", "update", "admin"]
 
     def delete(self, request, task_id, comment_id):
         try:
-            comment = Discussion.objects.get(id=comment_id, task_id=task_id)
+            comment = Discussion.objects.get(discussion_id=comment_id, task_id=task_id)
         except Discussion.DoesNotExist:
             return Response({"error": "Comment not found."}, status=404)
-
-        if request.user.role != 'admin' and comment.author != request.user:
+        if request.user.role != "admin" and comment.author != request.user:
             return Response({"error": "You can only delete your own comments."}, status=403)
-
         comment.delete()
         return Response({"message": "Comment deleted."})
