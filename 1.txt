@@ -25,6 +25,9 @@ git push origin feature/rbac-update
 
 
 celery -A core worker -l info -P solo  (in differnet terminal)
+celery -A core inspect registered - where all the register celery workers are there to be used
+celery -A core inspect active - currently executing task
+celery -A core inspect reserved - in queue waiting to be executed
 
 
 docker exec -it platform_postgres psql -U platform_user -d postgres -c "DROP DATABASE platform_db;"
