@@ -1,24 +1,67 @@
 """
-Content views — unified save/edit/submit flow.
-Renamed from Article to Content throughout.
+Content views — updated approval flow.
+
+APPROVAL FLOW:
+  1. Writer submits → status becomes 'in_review'
+  2. Any internal member approves → internal_approval=True
+     → notifications sent to ALL executives (stakeholder) and ALL admins (marketing)
+  3. Executive approves  → stakeholder_approval=True
+     Admin approves      → marketing_approval=True   (these two are PARALLEL)
+  4. When all 3 flags are True:
+     → all_approved_at is stamped
+     → Celery task scheduled to auto-publish after 24h
+     → Admin gets a manual "publish now" button via POST /approve/ with action=publish
+  5. If ANYONE rejects → status='rejected', locked_permanently=True (no edits allowed)
+  6. If a comment is added while status='in_review' → reverts to 'draft', all flags reset
+
+STAGES (4):
+  draft | in_review | rejected | published
+
+STATUS COUNTS API:
+  GET /api/content/contents/stats/          — draft / in_review / rejected / published / total
+  GET /api/content/contents/stage/<stage>/  — paginated list for a specific stage
 """
+
 from django.db import transaction
 from django.utils import timezone
 from django.core.cache import cache
+from django.db.models import Q, Count, OuterRef, Subquery
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from .models import Content, ContentAssignment, ContentComment, ContentVersion, CommentMention
-from accounts.models import User
-from utils.notifications.services import handle_mentions_and_notifications
-from .serializers import ContentSerializer
-from utils.permissions.base import HasRBACPermission
-from django.db.models import OuterRef, Subquery
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
+from drf_spectacular.utils import (
+    extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer,
+)
 from rest_framework import serializers as drf_serializers
 
+from .models import Content, ContentAssignment, ContentComment, ContentVersion, CommentMention, ContentHistory
+from .serializers import ContentSerializer
+from accounts.models import User
+from utils.notifications.services import handle_mentions_and_notifications
+from utils.permissions.base import HasRBACPermission
 
-# ── 1. LIST VIEWS ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _notify_exec_and_admin(content):
+    """Send notifications to all executives and admins after internal approval."""
+    from content.tasks import send_approval_email_task
+    exec_ids = list(
+        User.objects.filter(group="executive", is_active=True).values_list("user_id", flat=True)
+    )
+    admin_ids = list(
+        User.objects.filter(group="admin", is_active=True).values_list("user_id", flat=True)
+    )
+    all_ids = [str(uid) for uid in set(exec_ids + admin_ids)]
+    if all_ids:
+        send_approval_email_task.delay(all_ids, str(content.content_id), "pending_exec_admin")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. LIST VIEWS
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ActiveContentListView(APIView):
@@ -54,7 +97,63 @@ class PublishedContentListView(APIView):
         return Response(serializer.data)
 
 
-# ── 2. CONTENT DETAIL ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 1b. STAGE-BASED LIST VIEWS
+#   GET /api/content/contents/stage/<stage>/
+#   stage ∈ draft | in_review | rejected | published
+# ─────────────────────────────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content – Stages"],
+    description=(
+        "Return all content pieces for a given stage.\n\n"
+        "Valid stages: `draft` | `in_review` | `rejected` | `published`\n\n"
+        "Optional query params: `campaign_id`, `author_id`"
+    ),
+    parameters=[
+        OpenApiParameter("campaign_id", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("author_id",   OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False),
+    ],
+)
+class ContentByStageView(APIView):
+    """
+    GET /api/content/contents/stage/<stage>/
+
+    Returns content list for a specific stage (draft/in_review/rejected/published).
+    """
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "feedback", "admin"]
+
+    VALID_STAGES = {"draft", "in_review", "rejected", "published"}
+
+    def get(self, request, stage):
+        if stage not in self.VALID_STAGES:
+            return Response(
+                {"error": f"Invalid stage '{stage}'. Valid: {sorted(self.VALID_STAGES)}"},
+                status=400,
+            )
+
+        qs = Content.objects.filter(status=stage).select_related("author").order_by("-updated_at")
+
+        campaign_id = request.query_params.get("campaign_id", "").strip()
+        author_id   = request.query_params.get("author_id", "").strip()
+        if campaign_id:
+            qs = qs.filter(campaign_id=campaign_id)
+        if author_id:
+            qs = qs.filter(author__user_id=author_id)
+
+        serializer = ContentSerializer(qs, many=True)
+        return Response({
+            "stage": stage,
+            "count": qs.count(),
+            "items": serializer.data,
+        })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. CONTENT DETAIL
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ContentDetailView(APIView):
@@ -67,20 +166,36 @@ class ContentDetailView(APIView):
             c         = Content.objects.get(content_id=content_id)
             is_locked = c.locked_by is not None and c.locked_by != request.user
             return Response({
-                "content_id": str(c.content_id),
-                "title":      c.title,
-                "body":       c.body,
-                "image_url":  c.image.url if c.image else None,
-                "status":     c.status,
-                "author":     c.author.full_name,
-                "locked_by":  c.locked_by.full_name if c.locked_by else None,
-                "is_locked":  is_locked,
+                "content_id":           str(c.content_id),
+                "title":                c.title,
+                "body":                 c.body,
+                "image_url":            c.image.url if c.image else None,
+                "status":               c.status,
+                "content_type":         c.content_type,
+                "tags":                 c.tags,
+                "campaign_id":          c.campaign_id,
+                "event_id":             c.event_id,
+                "task_id":              str(c.task_id) if c.task_id else None,
+                "author":               c.author.full_name,
+                "locked_by":            c.locked_by.full_name if c.locked_by else None,
+                "is_locked":            is_locked,
+                "locked_permanently":   c.locked_permanently,
+                "internal_approval":    c.internal_approval,
+                "marketing_approval":   c.marketing_approval,
+                "stakeholder_approval": c.stakeholder_approval,
+                "all_approved_at":      c.all_approved_at.isoformat() if c.all_approved_at else None,
+                "can_publish_now": (
+                    c.internal_approval and c.marketing_approval and c.stakeholder_approval
+                    and c.status != "published"
+                ),
             })
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
 
 
-# ── 3. LOCK ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. LOCK
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ContentLock(APIView):
@@ -92,13 +207,21 @@ class ContentLock(APIView):
         with transaction.atomic():
             try:
                 c = Content.objects.select_for_update().get(content_id=content_id)
+
+                # Permanently locked (rejected) content cannot be edited
+                if c.locked_permanently:
+                    return Response(
+                        {"error": "Content is permanently locked due to rejection and cannot be edited."},
+                        status=423,
+                    )
+
                 if request.user.role == "sme":
                     if not ContentAssignment.objects.filter(content=c, sme=request.user).exists():
                         return Response({"error": "You are not assigned to this content."}, status=403)
                 if c.locked_by and c.locked_by != request.user:
                     return Response({"error": f"Locked by {c.locked_by.full_name}"}, status=423)
-                c.locked_by   = request.user
-                c.locked_at   = timezone.now()
+                c.locked_by = request.user
+                c.locked_at = timezone.now()
                 c._skip_version = True
                 c.save()
                 return Response({"message": "Lock acquired."})
@@ -109,8 +232,8 @@ class ContentLock(APIView):
         try:
             c = Content.objects.get(content_id=content_id)
             if c.locked_by == request.user:
-                c.locked_by   = None
-                c.locked_at   = None
+                c.locked_by = None
+                c.locked_at = None
                 c._skip_version = True
                 c.save()
                 return Response({"message": "Lock released."})
@@ -119,7 +242,9 @@ class ContentLock(APIView):
             return Response({"error": "Content not found."}, status=404)
 
 
-# ── 4. UNIFIED SAVE VIEW ──────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. UNIFIED SAVE VIEW (writer creates draft / submits for review)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(
     tags=["Content"],
@@ -130,9 +255,11 @@ class ContentLock(APIView):
             "body":            drf_serializers.CharField(),
             "content_id":      drf_serializers.UUIDField(required=False),
             "image":           drf_serializers.ImageField(required=False),
-            "submit":          drf_serializers.BooleanField(required=False, default=False),
+            "submit":          drf_serializers.BooleanField(required=False, default=False,
+                                   help_text="True = submit for review (writer → internal approvers)"),
             "notify_user_ids": drf_serializers.ListField(
-                                   child=drf_serializers.UUIDField(), required=False),
+                                   child=drf_serializers.UUIDField(), required=False,
+                                   help_text="Internal member IDs to notify (required when submit=true)"),
         }
     )
 )
@@ -140,9 +267,11 @@ class SaveContentView(APIView):
     """
     POST /api/content/contents/save/
 
-    A — No content_id: creates fresh content, auto-acquires lock.
+    A — No content_id: creates fresh draft, auto-acquires lock.
     B — content_id, submit=false: saves draft (lock required).
-    C — content_id, submit=true: submits for review, notifies selected users.
+    C — content_id, submit=true: submits for internal review.
+         • status → 'in_review'
+         • Notifies the specified internal members (notify_user_ids).
     """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
@@ -162,39 +291,52 @@ class SaveContentView(APIView):
         if not body:
             return Response({"error": "body is required."}, status=400)
         if submit and not notify_ids:
-            return Response({"error": "notify_user_ids required when submit=true."}, status=400)
+            return Response({"error": "notify_user_ids (internal members) required when submit=true."}, status=400)
 
         try:
             with transaction.atomic():
                 user = request.user
 
+                # ── A: New content ────────────────────────────────────────────
                 if not content_id:
-                    # Scenario A — fresh content
                     c = Content.objects.create(
-                        title = title,
-                        body = body,
-                        author= user,
-                        status = "draft",
+                        title     = title,
+                        body      = body,
+                        author    = user,
+                        status    = "draft",
                         locked_by = user,
                         locked_at = timezone.now(),
                     )
                     if image_file:
                         c.image = image_file
-                    c._version_data = {"title": title, "body": body,
-                                       "image_url": c.image.url if c.image else None,
-                                       "changed_by_id": str(user.user_id)}
+                    c._version_data = {
+                        "title":       title,
+                        "body":        body,
+                        "image_url":   c.image.url if c.image else None,
+                        "changed_by_id": str(user.user_id),
+                    }
                     c.save()
+                    ContentHistory.objects.create(
+                        content=c, action_type="draft_saved", performed_by=user
+                    )
                     return Response({
                         "content_id": str(c.content_id),
                         "message":    "Draft created. Lock auto-acquired.",
                         "status":     c.status,
                     }, status=201)
 
-                # Scenario B/C — existing content
+                # ── B / C: Existing content ───────────────────────────────────
                 c = Content.objects.select_for_update().get(content_id=content_id)
 
-                is_author= (c.author == user)
-                is_reviewer = (user.role == "reviewer")
+                # Reject edits on permanently locked content
+                if c.locked_permanently:
+                    return Response(
+                        {"error": "Content is permanently locked due to rejection."},
+                        status=423,
+                    )
+
+                is_author       = (c.author == user)
+                is_reviewer     = (user.role == "reviewer")
                 is_assigned_sme = (
                     user.role == "sme" and
                     ContentAssignment.objects.filter(content=c, sme=user).exists()
@@ -208,31 +350,54 @@ class SaveContentView(APIView):
                     return Response({"error": f"Locked by {c.locked_by.full_name}."}, status=423)
 
                 c.title = title
-                c.body = body
+                c.body  = body
                 if image_file:
                     c.image = image_file
 
-                c._version_data = {"title": title, "body": body,
-                                   "image_url": c.image.url if c.image else None,
-                                   "changed_by_id": str(user.user_id)}
+                c._version_data = {
+                    "title":       title,
+                    "body":        body,
+                    "image_url":   c.image.url if c.image else None,
+                    "changed_by_id": str(user.user_id),
+                }
 
                 if submit:
-                    c.status = "pending_reviewer"
+                    # Submit → in_review, notify specified internal members
+                    c.status    = "in_review"
                     c.locked_by = None
                     c.locked_at = None
+                    # Reset any prior approval flags
+                    c.internal_approval    = False
+                    c.marketing_approval   = False
+                    c.stakeholder_approval = False
+                    c.all_approved_at      = None
                     c.save()
+
                     from content.tasks import send_approval_email_task
                     send_approval_email_task.delay(
                         user_ids   = [str(uid) for uid in notify_ids],
                         content_id = str(c.content_id),
-                        stage      = "pending_reviewer",
+                        stage      = "in_review",
                     )
-                    return Response({"content_id": str(c.content_id), "status": c.status,
-                                     "message": "Submitted for review."})
+                    ContentHistory.objects.create(
+                        content=c, action_type="submitted", performed_by=user,
+                        note="Submitted for internal review.",
+                    )
+                    return Response({
+                        "content_id": str(c.content_id),
+                        "status":     c.status,
+                        "message":    "Submitted for internal review. Notified internal members.",
+                    })
                 else:
                     c.save()
-                    return Response({"content_id": str(c.content_id), "status": c.status,
-                                     "message": "Draft saved, version created."})
+                    ContentHistory.objects.create(
+                        content=c, action_type="draft_saved", performed_by=user
+                    )
+                    return Response({
+                        "content_id": str(c.content_id),
+                        "status":     c.status,
+                        "message":    "Draft saved.",
+                    })
 
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
@@ -240,54 +405,181 @@ class SaveContentView(APIView):
             return Response({"error": str(e)}, status=500)
 
 
-# ── 5. REVIEWER LIST ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 4b. INITIATION FORM (executive)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content"],
+    request=inline_serializer(
+        name="InitiateContentRequest",
+        fields={
+            "title":        drf_serializers.CharField(),
+            "brief":        drf_serializers.CharField(),
+            "content_type": drf_serializers.CharField(),
+            "campaign_id":  drf_serializers.CharField(),
+            "tags":         drf_serializers.CharField(required=False, allow_blank=True),
+            "event_id":     drf_serializers.CharField(required=False, allow_blank=True, allow_null=True),
+        }
+    )
+)
+class InitiateContentView(APIView):
+    """POST /api/content/contents/initiate/ — executive fills initiation form."""
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["write", "initiate"]
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
+
+    def post(self, request):
+        # (unchanged logic — kept from original)
+        from board.models import Campaign, Event, Task
+        title        = request.data.get("title", "").strip()
+        brief        = request.data.get("brief", "").strip()
+        content_type = request.data.get("content_type", "").strip()
+        campaign_id  = request.data.get("campaign_id", "").strip()
+        tags         = request.data.get("tags", "").strip()
+        event_id     = request.data.get("event_id") or None
+
+        if not all([title, brief, content_type, campaign_id]):
+            return Response({"error": "title, brief, content_type, campaign_id are required."}, status=400)
+
+        try:
+            campaign = Campaign.objects.get(pk=campaign_id)
+        except Campaign.DoesNotExist:
+            return Response({"error": "Campaign not found."}, status=404)
+
+        event = None
+        if event_id:
+            try:
+                event = Event.objects.get(pk=event_id, campaign=campaign)
+            except Event.DoesNotExist:
+                return Response({"error": "Event not found for this campaign."}, status=404)
+
+        try:
+            with transaction.atomic():
+                task = Task.objects.create(
+                    title       = f"[Content] {title}",
+                    campaign    = campaign,
+                    event       = event,
+                    created_by  = request.user,
+                    status      = "todo",
+                )
+                content = Content.objects.create(
+                    title        = title,
+                    body         = brief,
+                    author       = request.user,
+                    status       = "draft",
+                    content_type = content_type,
+                    tags         = tags,
+                    campaign     = campaign,
+                    event        = event,
+                    task_id      = task,
+                )
+                ContentHistory.objects.create(
+                    content=content, action_type="initiated", performed_by=request.user
+                )
+                return Response({
+                    "content_id": str(content.content_id),
+                    "task_id":    str(task.pk),
+                    "status":     content.status,
+                    "message":    "Content initiated.",
+                }, status=201)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. REVIEWER LIST
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ReviewerListView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write"]
+    required_roles = ["read", "write", "feedback", "admin"]
 
     def get(self, request):
-        users = User.objects.filter(role__in=["reviewer","writer"], is_active=True).exclude(user_id=request.user.user_id)
-        data  = [{"user_id": str(u.user_id), "full_name": u.full_name, "email": u.email, "role": u.role} for u in users]
-        return Response(data)
+        internal = User.objects.filter(group="internal", is_active=True)
+        return Response([
+            {"user_id": str(u.user_id), "full_name": u.full_name, "email": u.email}
+            for u in internal
+        ])
 
 
-# ── 6. NOTIFY CANDIDATES ─────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. NOTIFY CANDIDATES
+# ─────────────────────────────────────────────────────────────────────────────
 
-@extend_schema(
-    tags=["Content"],
-    parameters=[OpenApiParameter("stage", OpenApiTypes.STR, OpenApiParameter.QUERY,
-                                  enum=["pending_executive","pending_admin"])]
-)
+@extend_schema(tags=["Content"])
 class NotifyCandidatesView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["feedback", "promote", "admin"]
+    required_roles = ["write", "admin"]
 
-    def get(self, request, content_id):
-        stage = request.query_params.get("stage", "")
-        role_map = {"pending_executive": "exec_approver", "pending_admin": "admin"}
-        target_role = role_map.get(stage)
-        if not target_role:
-            return Response({"error": "stage must be pending_executive or pending_admin"}, status=400)
-        users = User.objects.filter(role=target_role, is_active=True)
-        data  = [{"user_id": str(u.user_id), "full_name": u.full_name, "email": u.email} for u in users]
-        return Response(data)
+    def post(self, request, content_id):
+        notify_ids = request.data.get("notify_user_ids", [])
+        if not notify_ids:
+            return Response({"error": "notify_user_ids required."}, status=400)
+        try:
+            c = Content.objects.get(content_id=content_id)
+            from content.tasks import send_approval_email_task
+            send_approval_email_task.delay(
+                [str(uid) for uid in notify_ids], str(c.content_id), "in_review"
+            )
+            return Response({"message": "Notifications sent."})
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
 
 
-# ── 7. ASSIGN SME ────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 6b/6c. CAMPAIGN & EVENT DROPDOWNS
+# ─────────────────────────────────────────────────────────────────────────────
 
-@extend_schema(
-    tags=["Content"],
-    request=inline_serializer(name="AssignSMERequest",
-                               fields={"sme_id": drf_serializers.UUIDField()})
-)
+@extend_schema(tags=["Content"])
+class CampaignListView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "write", "feedback", "admin"]
+
+    def get(self, request):
+        from board.models import Campaign
+        try:
+            campaigns = Campaign.objects.order_by("title")
+            return Response([
+            {"campaign_id": str(c.pk), "title": c.title}
+            for c in campaigns
+            ])
+        except Exception as e:
+            return Response({"error": str(e)})
+
+
+@extend_schema(tags=["Content"])
+class EventListView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "write", "feedback", "admin"]
+
+    def get(self, request):
+        from board.models import Event
+        campaign_id = request.query_params.get("campaign_id")
+        qs = Event.objects.all()
+        if campaign_id:
+            qs = qs.filter(campaign_id=campaign_id)
+        return Response([
+            {"event_id": str(e.pk), "title": e.title}
+            for e in qs.order_by("title")
+        ])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. ASSIGN SME
+# ─────────────────────────────────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
 class AssignSMEView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["feedback"]
+    required_roles = ["admin", "promote"]
 
     def post(self, request, content_id):
         sme_id = request.data.get("sme_id")
@@ -296,7 +588,8 @@ class AssignSMEView(APIView):
                 c   = Content.objects.select_for_update().get(content_id=content_id)
                 sme = User.objects.get(user_id=sme_id, role="sme")
                 assignment, created = ContentAssignment.objects.get_or_create(
-                    content=c, sme=sme, defaults={"assigned_by": request.user}
+                    content=c, sme=sme,
+                    defaults={"assigned_by": request.user, "executive": request.user}
                 )
                 if created:
                     from content.tasks import send_sme_assignment_email_task
@@ -309,58 +602,223 @@ class AssignSMEView(APIView):
             return Response({"error": "SME not found."}, status=404)
 
 
-# ── 8. APPROVE ───────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. APPROVE / REJECT / PUBLISH
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(
     tags=["Content"],
-    request=inline_serializer(name="ApproveContentRequest",
-                               fields={"notify_user_ids": drf_serializers.ListField(child=drf_serializers.UUIDField())})
+    request=inline_serializer(
+        name="ApproveContentRequest",
+        fields={
+            "action": drf_serializers.ChoiceField(
+                choices=["approve", "reject", "publish"],
+                help_text=(
+                    "approve — cast your approval vote\n"
+                    "reject  — reject and permanently lock content\n"
+                    "publish — admin-only: publish immediately once all 3 approvals are in"
+                ),
+            ),
+            "reason": drf_serializers.CharField(
+                required=False, allow_blank=True,
+                help_text="Reason for rejection (required when action=reject)",
+            ),
+        }
+    )
 )
 class ApproveContent(APIView):
+    """
+    POST /api/content/contents/<content_id>/approve/
+
+    APPROVAL FLOW:
+    ─────────────────────────────────────────────────────────────
+    Step 1 — Internal member approves (action=approve, group=internal):
+      • Sets internal_approval=True
+      • Notifies ALL executives and ALL admins
+
+    Step 2 — Executive approves (action=approve, group=executive):
+      • Sets stakeholder_approval=True
+      • Checks if all 3 are done → stamps all_approved_at + schedules auto-publish
+
+    Step 2 — Admin approves (action=approve, group=admin):
+      • Sets marketing_approval=True
+      • Checks if all 3 are done → stamps all_approved_at + schedules auto-publish
+
+    Reject (action=reject) — any of the 3 approvers:
+      • Sets status=rejected, locked_permanently=True
+      • Notifies author
+
+    Publish now (action=publish, group=admin only):
+      • Admin manually publishes when all 3 flags are True
+    ─────────────────────────────────────────────────────────────
+    """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
     required_roles = ["feedback", "admin", "promote"]
 
+    INTERNAL_GROUPS  = {"internal"}
+    EXECUTIVE_GROUPS = {"executive"}
+    ADMIN_GROUPS     = {"admin"}
+
     def post(self, request, content_id):
-        notify_ids = request.data.get("notify_user_ids", [])
+        action = request.data.get("action", "").strip()
+        reason = request.data.get("reason", "").strip()
+        user   = request.user
+        group  = getattr(user, "group", "")
+
+        if action not in ("approve", "reject", "publish"):
+            return Response({"error": "action must be one of: approve, reject, publish"}, status=400)
+
         try:
             with transaction.atomic():
-                c         = Content.objects.select_for_update().get(content_id=content_id)
-                user      = request.user
-                user_role = user.role
-                from content.tasks import send_approval_email_task
+                c = Content.objects.select_for_update().get(content_id=content_id)
 
-                if c.status == "pending_reviewer":
-                    if user_role not in ["reviewer", "sme"]:
-                        return Response({"error": "Only reviewers or SMEs can approve at this stage."}, status=403)
-                    if user_role == "sme" and not ContentAssignment.objects.filter(content=c, sme=user).exists():
-                        return Response({"error": "Not the assigned SME."}, status=403)
-                    if not notify_ids:
-                        return Response({"error": "notify_user_ids required."}, status=400)
-                    c.status = "pending_executive"
-                    c.save()
-                    send_approval_email_task.delay([str(u) for u in notify_ids], str(c.content_id), "pending_executive")
-                    return Response({"message": "Sent to executives.", "status": c.status})
+                # ── REJECT ────────────────────────────────────────────────────
+                if action == "reject":
+                    if group not in (self.INTERNAL_GROUPS | self.EXECUTIVE_GROUPS | self.ADMIN_GROUPS):
+                        return Response({"error": "You do not have permission to reject."}, status=403)
+                    if c.status not in ("in_review",):
+                        return Response(
+                            {"error": f"Cannot reject content in '{c.status}' status."},
+                            status=400,
+                        )
+                    if not reason:
+                        return Response({"error": "reason is required when rejecting."}, status=400)
 
-                elif user_role == "exec_approver" and c.status == "pending_executive":
-                    if not notify_ids:
-                        return Response({"error": "notify_user_ids required."}, status=400)
-                    c.status = "pending_admin"
-                    c.save()
-                    send_approval_email_task.delay([str(u) for u in notify_ids], str(c.content_id), "pending_admin")
-                    return Response({"message": "Sent to admins.", "status": c.status})
+                    c.status              = "rejected"
+                    c.locked_permanently  = True
+                    c.locked_by           = None
+                    c.locked_at           = None
+                    c.save(update_fields=["status", "locked_permanently", "locked_by", "locked_at"])
 
-                elif user_role == "admin" and c.status == "pending_admin":
+                    ContentHistory.objects.create(
+                        content=c, action_type="rejected",
+                        performed_by=user, note=reason,
+                    )
+
+                    from content.tasks import send_rejection_email_task
+                    send_rejection_email_task.delay(str(c.content_id), user.full_name, reason)
+
+                    cache.delete(f"content_detail_{content_id}")
+                    return Response({
+                        "message":  "Content rejected and permanently locked.",
+                        "status":   c.status,
+                        "locked_permanently": c.locked_permanently,
+                    })
+
+                # ── PUBLISH NOW (admin manual) ─────────────────────────────────
+                if action == "publish":
+                    if group not in self.ADMIN_GROUPS:
+                        return Response({"error": "Only admins can manually publish."}, status=403)
+                    if not (c.internal_approval and c.marketing_approval and c.stakeholder_approval):
+                        return Response(
+                            {"error": "All three approvals must be collected before publishing."},
+                            status=400,
+                        )
+                    if c.status == "published":
+                        return Response({"message": "Content is already published."})
+
                     c.status = "published"
-                    c.save()
+                    c.save(update_fields=["status"])
+                    ContentHistory.objects.create(
+                        content=c, action_type="published",
+                        performed_by=user, note="Manually published by admin.",
+                    )
+                    cache.delete(f"content_detail_{content_id}")
+                    cache.delete("published_contents_list")
                     return Response({"message": "Content published!", "status": c.status})
 
-                return Response({"error": "Invalid stage or permissions."}, status=403)
+                # ── APPROVE ───────────────────────────────────────────────────
+                if c.status != "in_review":
+                    return Response(
+                        {"error": f"Content must be 'in_review' to approve. Current: '{c.status}'"},
+                        status=400,
+                    )
+
+                if c.locked_permanently:
+                    return Response({"error": "Content is permanently locked."}, status=423)
+
+                # Step 1: Internal member
+                if group in self.INTERNAL_GROUPS:
+                    if c.internal_approval:
+                        return Response({"message": "Internal approval already recorded."})
+                    c.internal_approval = True
+                    c.save(update_fields=["internal_approval"])
+                    ContentHistory.objects.create(
+                        content=c, action_type="approved_internal", performed_by=user,
+                        note="Internal member approved.",
+                    )
+                    # Now notify executives and admins
+                    _notify_exec_and_admin(c)
+                    return Response({
+                        "message": "Internal approval recorded. Executives and admins have been notified.",
+                        "internal_approval":    c.internal_approval,
+                        "marketing_approval":   c.marketing_approval,
+                        "stakeholder_approval": c.stakeholder_approval,
+                    })
+
+                # Step 2a: Executive (stakeholder sign-off)
+                elif group in self.EXECUTIVE_GROUPS:
+                    if not c.internal_approval:
+                        return Response(
+                            {"error": "Content must be internally approved first."},
+                            status=400,
+                        )
+                    if c.stakeholder_approval:
+                        return Response({"message": "Stakeholder (executive) approval already recorded."})
+                    c.stakeholder_approval = True
+                    c.save(update_fields=["stakeholder_approval"])
+                    ContentHistory.objects.create(
+                        content=c, action_type="approved_stakeholder", performed_by=user,
+                        note="Executive (stakeholder) approved.",
+                    )
+                    triple = c.check_and_mark_all_approved()
+                    return Response({
+                        "message":    "Stakeholder approval recorded." + (
+                            " All approvals complete — auto-publish scheduled in 24h." if triple else ""
+                        ),
+                        "internal_approval":    c.internal_approval,
+                        "marketing_approval":   c.marketing_approval,
+                        "stakeholder_approval": c.stakeholder_approval,
+                        "all_approved_at":      c.all_approved_at.isoformat() if c.all_approved_at else None,
+                    })
+
+                # Step 2b: Admin (marketing sign-off)
+                elif group in self.ADMIN_GROUPS:
+                    if not c.internal_approval:
+                        return Response(
+                            {"error": "Content must be internally approved first."},
+                            status=400,
+                        )
+                    if c.marketing_approval:
+                        return Response({"message": "Marketing (admin) approval already recorded."})
+                    c.marketing_approval = True
+                    c.save(update_fields=["marketing_approval"])
+                    ContentHistory.objects.create(
+                        content=c, action_type="approved_marketing", performed_by=user,
+                        note="Admin (marketing) approved.",
+                    )
+                    triple = c.check_and_mark_all_approved()
+                    return Response({
+                        "message":    "Marketing approval recorded." + (
+                            " All approvals complete — auto-publish scheduled in 24h." if triple else ""
+                        ),
+                        "internal_approval":    c.internal_approval,
+                        "marketing_approval":   c.marketing_approval,
+                        "stakeholder_approval": c.stakeholder_approval,
+                        "all_approved_at":      c.all_approved_at.isoformat() if c.all_approved_at else None,
+                    })
+
+                else:
+                    return Response({"error": "Your group does not have approval rights."}, status=403)
+
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
 
 
-# ── 9. VERSION HISTORY ───────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 9–11. VERSION HISTORY
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ContentVersionHistory(APIView):
@@ -370,28 +828,31 @@ class ContentVersionHistory(APIView):
 
     def get(self, request, content_id):
         try:
-            c  = Content.objects.get(content_id=content_id)
-            user = request.user
-            is_sme = user.role == "sme" and ContentAssignment.objects.filter(content=c, sme=user).exists()
-            if not (c.author == user or user.role in ["reviewer","admin","exec_approver"] or is_sme):
+            c       = Content.objects.get(content_id=content_id)
+            user    = request.user
+            is_sme  = (user.role == "sme" and
+                       ContentAssignment.objects.filter(content=c, sme=user).exists())
+            if not (c.author == user or user.role in ["reviewer", "admin", "exec_approver"] or is_sme):
                 return Response({"error": "Permission denied."}, status=403)
             versions = ContentVersion.objects.filter(content=c).select_related("changed_by")
             data = [{
-                "version_id":      str(v.version_id),
-                "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
-                "role": v.changed_by.role if v.changed_by else "N/A",
-                "timestamp": v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "title": v.title,
-                "image_url": v.image_url,
-                "body_preview":v.body[:100] + "...",
+                "version_id":   str(v.version_id),
+                "changed_by":   v.changed_by.full_name if v.changed_by else "Unknown",
+                "role":         v.changed_by.role if v.changed_by else "N/A",
+                "timestamp":    v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "title":        v.title,
+                "image_url":    v.image_url,
+                "body_preview": v.body[:100] + "...",
             } for v in versions]
-            return Response({"content_id": str(c.content_id), "title": c.title,
-                             "status": c.status, "history": data})
+            return Response({
+                "content_id": str(c.content_id),
+                "title":      c.title,
+                "status":     c.status,
+                "history":    data,
+            })
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
 
-
-# ── 10. VIEW SPECIFIC VERSION ────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ContentVersionDetailView(APIView):
@@ -406,19 +867,17 @@ class ContentVersionDetailView(APIView):
             return Response({
                 "version_id": str(v.version_id),
                 "content_id": str(c.content_id),
-                "title": v.title,
-                "body": v.body,
-                "image_url": v.image_url,
-                "changed_by":v.changed_by.full_name if v.changed_by else "Unknown",
-                "saved_at": v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "title":      v.title,
+                "body":       v.body,
+                "image_url":  v.image_url,
+                "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
+                "saved_at":   v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
             })
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
         except ContentVersion.DoesNotExist:
             return Response({"error": "Version not found."}, status=404)
 
-
-# ── 11. LATEST VERSION ───────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class LatestVersionView(APIView):
@@ -434,18 +893,36 @@ class LatestVersionView(APIView):
         v = ContentVersion.objects.filter(content=c).order_by("-created_at").first()
         if not v:
             return Response({"error": "No versions found."}, status=404)
-        return Response({"version_id": str(v.version_id), "content_id": str(c.content_id),
-                         "title": v.title, "body": v.body, "image_url": v.image_url,
-                         "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
-                         "saved_at": v.created_at.strftime("%Y-%m-%d %H:%M:%S")})
+        return Response({
+            "version_id": str(v.version_id),
+            "content_id": str(c.content_id),
+            "title":      v.title,
+            "body":       v.body,
+            "image_url":  v.image_url,
+            "changed_by": v.changed_by.full_name if v.changed_by else "Unknown",
+            "saved_at":   v.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        })
 
 
-# ── 12. COMMENT ──────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. COMMENT (reverts to draft)
+# ─────────────────────────────────────────────────────────────────────────────
 
-@extend_schema(tags=["Content"],
-               request=inline_serializer(name="WriteCommentRequest",
-                                          fields={"comment_text": drf_serializers.CharField()}))
+@extend_schema(
+    tags=["Content"],
+    request=inline_serializer(
+        name="WriteCommentRequest",
+        fields={"comment_text": drf_serializers.CharField()}
+    )
+)
 class WriteComment(APIView):
+    """
+    POST /api/content/contents/<content_id>/comment/
+
+    Adding a comment while content is 'in_review' reverts it to 'draft'
+    and resets all approval flags so the whole flow restarts.
+    Rejected/published content cannot be commented on.
+    """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
     required_roles = ["feedback", "admin"]
@@ -457,27 +934,70 @@ class WriteComment(APIView):
         try:
             with transaction.atomic():
                 c = Content.objects.select_for_update().get(content_id=content_id)
-                if request.user.role == "sme":
-                    if not ContentAssignment.objects.filter(content=c, sme=request.user).exists():
-                        return Response({"error": "Not assigned to this content."}, status=403)
-                c.status= "draft"
-                c.locked_by = None
-                c.locked_at = None
-                c._skip_version = True
-                c.save()
-                latest = ContentVersion.objects.filter(content=c).order_by("-created_at").first()
-                comment = ContentComment.objects.create(content=c, user=request.user,
-                                                        comment_text=text, version=latest)
+
+                if c.status in ("rejected", "published"):
+                    return Response(
+                        {"error": f"Cannot comment on '{c.status}' content."},
+                        status=400,
+                    )
+
+                # Reverts to draft if in_review (handled by ContentComment.save)
+                latest  = ContentVersion.objects.filter(content=c).order_by("-created_at").first()
+                comment = ContentComment.objects.create(
+                    content=c, user=request.user, comment_text=text, version=latest
+                )
                 cache.delete(f"content_comments_{content_id}")
+
+                ContentHistory.objects.create(
+                    content=c, action_type="comment_added",
+                    performed_by=request.user, note=text,
+                )
+
                 handle_mentions_and_notifications(text, c, comment, sender=request.user)
-                return Response({"message": "Feedback recorded.", "new_status": c.status})
+                return Response({
+                    "message":    "Comment recorded. Content reverted to draft.",
+                    "new_status": c.status,
+                    "comment_id": str(comment.comment_id),
+                })
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
 
-# ── 13. COMMENT HISTORY ──────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# RESOLVE COMMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+@extend_schema(tags=["Content"])
+class ResolveComment(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["feedback", "admin"]
+
+    def patch(self, request, comment_id):
+        try:
+            with transaction.atomic():
+                comment = ContentComment.objects.select_for_update().get(comment_id=comment_id)
+                if comment.resolved:
+                    return Response({"message": "Comment already resolved."})
+                comment.resolved = True
+                comment.save(update_fields=["resolved"])
+                cache.delete(f"content_comments_{comment.content.content_id}")
+                return Response({
+                    "message":    "Comment resolved.",
+                    "comment_id": str(comment.comment_id),
+                    "resolved":   comment.resolved,
+                })
+        except ContentComment.DoesNotExist:
+            return Response({"error": "Comment not found."}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 13. COMMENT HISTORY
+# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ContentCommentHistoryView(APIView):
@@ -486,7 +1006,7 @@ class ContentCommentHistoryView(APIView):
     required_roles = ["read", "feedback", "admin", "promote"]
 
     def get(self, request, content_id):
-        cache_key = f"content_comments_{content_id}"
+        cache_key   = f"content_comments_{content_id}"
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data)
@@ -495,14 +1015,23 @@ class ContentCommentHistoryView(APIView):
             version_subquery = ContentVersion.objects.filter(
                 content=c, created_at__lte=OuterRef("created_at")
             ).order_by("-created_at").values("version_id")[:1]
-            comments = ContentComment.objects.filter(content=c).select_related("user").annotate(
-                detected_version_id=Subquery(version_subquery)
-            ).order_by("created_at")
-            data = [{"comment_id": str(cm.comment_id), "user": cm.user.full_name,
-                     "role": cm.user.role, "text": cm.comment_text,
-                     "timestamp": cm.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                     "version_at_time": str(cm.detected_version_id) if cm.detected_version_id else "Initial Draft"}
-                    for cm in comments]
+            comments = (
+                ContentComment.objects
+                .filter(content=c)
+                .select_related("user")
+                .annotate(detected_version_id=Subquery(version_subquery))
+                .order_by("created_at")
+            )
+            data = [{
+                "comment_id":      str(cm.comment_id),
+                "user":            cm.user.full_name,
+                "role":            cm.user.role,
+                "group":           cm.user.group,
+                "text":            cm.comment_text,
+                "resolved":        cm.resolved,
+                "timestamp":       cm.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "version_at_time": str(cm.detected_version_id) if cm.detected_version_id else "Initial Draft",
+            } for cm in comments]
             response_data = {"content_title": c.title, "comments": data}
             cache.set(cache_key, response_data, timeout=600)
             return Response(response_data)
@@ -510,19 +1039,19 @@ class ContentCommentHistoryView(APIView):
             return Response({"error": "Content not found."}, status=404)
 
 
-# ── 14. COMMENT EDIT/DELETE ──────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. COMMENT EDIT / DELETE
+# ─────────────────────────────────────────────────────────────────────────────
 
-@extend_schema(tags=["Content"],
-               request=inline_serializer(name="CommentEditRequest",
-                                          fields={"comment_text": drf_serializers.CharField()}))
+@extend_schema(tags=["Content"])
 class CommentEditDelete(APIView):
     permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles= ["feedback", "admin"]
+    required_area  = "content"
+    required_roles = ["feedback", "admin"]
 
     def patch(self, request, comment_id):
         try:
-            comment = ContentComment.objects.get(comment_id=comment_id)
+            comment  = ContentComment.objects.get(comment_id=comment_id)
             if comment.user != request.user:
                 return Response({"error": "You did not write this comment."}, status=403)
             new_text = request.data.get("comment_text", "").strip()
@@ -537,7 +1066,7 @@ class CommentEditDelete(APIView):
 
     def delete(self, request, comment_id):
         try:
-            comment = ContentComment.objects.get(comment_id=comment_id)
+            comment    = ContentComment.objects.get(comment_id=comment_id)
             if comment.user != request.user:
                 return Response({"error": "You can only delete your own comments."}, status=403)
             content_id = comment.content.content_id
@@ -546,3 +1075,154 @@ class CommentEditDelete(APIView):
             return Response({"message": "Comment removed."})
         except ContentComment.DoesNotExist:
             return Response({"error": "Comment not found."}, status=404)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. CONTENT STATS — all 4 stages + counts
+# ─────────────────────────────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content – Analytics"],
+    description=(
+        "Returns count of content pieces per stage:\n"
+        "  • **draft**     — in draft\n"
+        "  • **in_review** — currently under review (awaiting any approval)\n"
+        "  • **rejected**  — rejected and locked\n"
+        "  • **published** — published\n"
+        "  • **total**     — all content\n\n"
+        "Optional `campaign_id` and `author_id` query params to narrow scope."
+    ),
+    parameters=[
+        OpenApiParameter("campaign_id", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("author_id",   OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False),
+    ],
+)
+class ContentStatsView(APIView):
+    """
+    GET /api/content/contents/stats/
+
+    Response:
+    {
+        "draft":     12,
+        "in_review": 5,
+        "rejected":  2,
+        "published": 34,
+        "total":     53
+    }
+    """
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "feedback", "admin"]
+
+    def get(self, request):
+        qs = Content.objects.all()
+
+        campaign_id = request.query_params.get("campaign_id", "").strip()
+        author_id   = request.query_params.get("author_id", "").strip()
+        if campaign_id:
+            qs = qs.filter(campaign_id=campaign_id)
+        if author_id:
+            qs = qs.filter(author__user_id=author_id)
+
+        counts = qs.aggregate(
+            draft     = Count("content_id", filter=Q(status="draft")),
+            in_review = Count("content_id", filter=Q(status="in_review")),
+            rejected  = Count("content_id", filter=Q(status="rejected")),
+            published = Count("content_id", filter=Q(status="published")),
+            total     = Count("content_id"),
+        )
+        return Response(counts)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 16. CONTENT FILTER / ANALYTICS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@extend_schema(
+    tags=["Content – Analytics"],
+    parameters=[
+        OpenApiParameter("content_type", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("status",       OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False,
+                         description="draft | in_review | rejected | published"),
+        OpenApiParameter("author_id",    OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("campaign_id",  OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("tags",         OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("year",         OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("month",        OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("quarter",      OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("group_by",     OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False,
+                         description="Pass 'period' for per-period breakdown"),
+    ],
+)
+class ContentFilterView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "feedback", "admin"]
+
+    QUARTER_MONTHS = {1: (1, 3), 2: (4, 6), 3: (7, 9), 4: (10, 12)}
+
+    def get(self, request):
+        qs = Content.objects.select_related("author").order_by("-created_at")
+
+        content_type = request.query_params.get("content_type", "").strip()
+        status       = request.query_params.get("status", "").strip()
+        author_id    = request.query_params.get("author_id", "").strip()
+        campaign_id  = request.query_params.get("campaign_id", "").strip()
+        tags_raw     = request.query_params.get("tags", "").strip()
+
+        if content_type:
+            qs = qs.filter(content_type__iexact=content_type)
+        if status:
+            qs = qs.filter(status=status)
+        if author_id:
+            qs = qs.filter(author__user_id=author_id)
+        if campaign_id:
+            qs = qs.filter(campaign_id=campaign_id)
+        if tags_raw:
+            for tag in [t.strip() for t in tags_raw.split(",") if t.strip()]:
+                qs = qs.filter(
+                    Q(tags__iexact=tag) |
+                    Q(tags__istartswith=tag + ",") |
+                    Q(tags__iendswith="," + tag) |
+                    Q(tags__icontains="," + tag + ",")
+                )
+
+        year_raw    = request.query_params.get("year")
+        month_raw   = request.query_params.get("month")
+        quarter_raw = request.query_params.get("quarter")
+        year    = int(year_raw)    if year_raw    and year_raw.isdigit()    else None
+        month   = int(month_raw)   if month_raw   and month_raw.isdigit()   else None
+        quarter = int(quarter_raw) if quarter_raw and quarter_raw.isdigit() else None
+
+        if year:
+            qs = qs.filter(created_at__year=year)
+            if month and 1 <= month <= 12:
+                qs = qs.filter(created_at__month=month)
+            elif quarter and quarter in self.QUARTER_MONTHS:
+                m_start, m_end = self.QUARTER_MONTHS[quarter]
+                qs = qs.filter(created_at__month__gte=m_start, created_at__month__lte=m_end)
+
+        total    = qs.count()
+        items    = ContentSerializer(qs, many=True).data
+        response = {"total": total, "items": items}
+
+        if request.query_params.get("group_by", "").strip() == "period":
+            response["by_period"] = self._period_breakdown(qs, year, quarter)
+
+        return Response(response)
+
+    @staticmethod
+    def _period_breakdown(qs, year, quarter):
+        from django.db.models.functions import TruncMonth, TruncYear
+        if not year:
+            rows = (qs.annotate(period=TruncYear("created_at"))
+                      .values("period")
+                      .annotate(count=Count("content_id"))
+                      .order_by("period"))
+            return [{"period": r["period"].strftime("%Y"), "count": r["count"]} for r in rows]
+        else:
+            rows = (qs.annotate(period=TruncMonth("created_at"))
+                      .values("period")
+                      .annotate(count=Count("content_id"))
+                      .order_by("period"))
+            return [{"period": r["period"].strftime("%Y-%m"), "count": r["count"]} for r in rows]

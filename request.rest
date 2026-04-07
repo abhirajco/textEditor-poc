@@ -1,17 +1,41 @@
-# ============================================================
-#  Merged Platform — REST Client
-#  VS Code REST Client extension required
-#  All seeded passwords: Pass123!
-# ============================================================
+### ============================================================
+### Content Management API — Full Test Suite
+### ============================================================
+### Usage: Open in VS Code with REST Client extension
+###        or import into Insomnia / Postman
+###
+### VARIABLES — update these before running
+### ============================================================
+
+@baseUrl = http://localhost:8000/api
+@contentUrl = {{baseUrl}}/content
+
+### Auth tokens — obtain from login endpoints
+# @writerToken     = Bearer <writer_jwt_token>
+# @internalToken   = Bearer <internal_member_jwt_token>
+# @executiveToken  = Bearer <executive_jwt_token>
+# @adminToken      = Bearer <admin_jwt_token>
+
+### IDs — fill in after running create/list calls
+@contentId    = 00000000-0000-0000-0000-000000000000
+@campaignId   = 1
+@eventId      = 1
+@versionId    = 00000000-0000-0000-0000-000000000000
+@commentId    = 00000000-0000-0000-0000-000000000000
+@internalId   = 00000000-0000-0000-0000-000000000000
+@executiveId  = 00000000-0000-0000-0000-000000000000
+@adminId      = 00000000-0000-0000-0000-000000000000
+@smeId        = 00000000-0000-0000-0000-000000000000
+
+
+### ============================================================
+### AUTH — Login to get tokens
+### ============================================================
 
 @base     = http://127.0.0.1:8000/api
 @password = Pass123!
 
-@articleId = 1
 
-@versionId = 1
-
-@commentId =1
 # ============================================================
 #  1. AUTH FLOW
 # ============================================================
@@ -31,17 +55,8 @@ POST {{base}}/accounts/verify-otp/
 Content-Type: application/json
 
 {
-  "email": "newuser@platform.com",
-  "otp":   "441920"
-}
-
-###
-POST {{base}}/accounts/login/
-Content-Type: application/json
-
-{
-  "email":    "newuser@example.com",
-  "password": "{{password}}"
+  "email": "newuser@example.com",
+  "otp":   "123456"
 }
 
 ### 1c. Login as Admin
@@ -67,6 +82,7 @@ Content-Type: application/json
   "email":    "exec@platform.com",
   "password": "{{password}}"
 }
+
 ###
 @execToken = {{execLogin.response.body.access}}
 
@@ -128,286 +144,493 @@ Content-Type: application/json
 }
 
 
-# ============================================================
-#  2. ADMIN — USER MANAGEMENT
-# ============================================================
+### ============================================================
+### DROPDOWNS (for form population)
+### ============================================================
 
-### 2a. View all users
-GET {{base}}/accounts/users/all/
-Authorization: Bearer {{adminToken}}
-
-### 2b. View pending users (role = none, need assignment)
-GET {{base}}/accounts/users/pending/
-Authorization: Bearer {{adminToken}}
-
-### 2c. Assign group + role to a user
-# group choices: admin | executive | internal | external | user
-# role choices:  admin | exec_approver | executive | writer | reviewer | sme | none
-POST {{base}}/accounts/users/assign/2/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "group": "internal",
-  "role":  "writer"
-}
-
-### 2d. Delete a user
-DELETE {{base}}/accounts/users/delete/5/
-Authorization: Bearer {{adminToken}}
-
-### 2e. RBAC audit — see all users and their permission matrix
-GET {{base}}/accounts/users/rbac-audit/
-Authorization: Bearer {{adminToken}}
-
-### 2f. @Mention user search (used by frontend dropdown for both article comments and task discussion)
-# Returns users whose name starts with the query word
-GET {{base}}/accounts/users/search/?q=ali
-Authorization: Bearer {{adminToken}}
-
-### 2g. Search with multiple words
-GET {{base}}/accounts/users/search/?q=b
-Authorization: Bearer {{adminToken}}
-
+### Get active campaigns
+GET {{contentUrl}}/campaigns/active/
+Authorization: Bearer  {{writerToken}}
 
 ###
 
-# ============================================================
-# CONTENT — ARTICLE SAVE / SUBMIT FLOW
-# ============================================================
+### Get events for a campaign
+GET {{contentUrl}}/events/?campaign_id=fcb7e68f-87df-489e-9744-9b171f739d4b
+Authorization: Bearer  {{writerToken}}
 
-### Step 1 — Create fresh article (no article_id)
-# Auto-locks to writer. Creates draft. Version created in background.
-POST {{base}}/content/contents/save/
+###
+
+### Get internal members (reviewer+writer list)
+GET {{contentUrl}}/contents/reviewers-list/
+Authorization: Bearer {{writerToken}}
+
+
+### ============================================================
+### STAGE 1 — WRITER CREATES DRAFT
+### ============================================================
+
+### A1. Create new draft content (no content_id → new draft)
+# @name createDraft
+POST {{contentUrl}}/contents/save/
 Authorization: Bearer {{writerToken}}
 Content-Type: application/json
 
 {
-  "title":   "A fresh content",
-  "body": "This is the initial content of the article."
+  "campaign_id": "fcb7e68f-87df-489e-9744-9b171f739d4b",
+  "title": "My First Blog Post",
+  "body": "This is the body of the content piece.",
+  "submit": false
 }
 
 ###
 
-### Step 2 — Save existing article (update draft, lock already held)
-POST {{base}}/content/contents/save/
-Authorization: Bearer {{writerToken}}
+### A2. Save/update existing draft (lock required first → see Lock section)
+POST {{contentUrl}}/contents/save/
+Authorization: {{writerToken}}
 Content-Type: application/json
 
 {
-  "content_id": "78449f51-0dfd-435e-82cc-5109211d03b3",
-  "title":  "1st update",
-  "body": "Updated body with more detail."
+  "content_id": "{{contentId}}",
+  "title": "My First Blog Post — Updated",
+  "body": "Updated body with more details.",
+  "submit": false
 }
 
 ###
 
-### Step 3a — Get reviewer dropdown (call before submitting)
-GET {{base}}/content/articles/reviewers-list/
-Authorization: Bearer {{writerToken}}
-
-###
-
-### Step 3b — Submit for review (writer selects reviewer UUIDs from dropdown)
-POST {{base}}/content/articles/save/
-Authorization: Bearer {{writerToken}}
+### A3. Submit for internal review (status → in_review)
+###     notify_user_ids = internal member(s) to notify
+POST {{contentUrl}}/contents/save/
+Authorization: {{writerToken}}
 Content-Type: application/json
 
 {
-  "article_id":      "{{articleId}}",
-  "title":           "My First Article — Final",
-  "content":         "Final polished content ready for review.",
-  "submit":          true,
-  "notify_user_ids": ["REVIEWER_UUID_1", "WRITER_UUID_2"]
+  "content_id": "{{contentId}}",
+  "title": "My First Blog Post — Final",
+  "body": "This is the final version ready for review.",
+  "submit": true,
+  "notify_user_ids": ["{{internalId}}"]
 }
 
-###
 
-# ============================================================
-# CONTENT — LOCK
-# ============================================================
+### ============================================================
+### CONTENT LOCKING
+### ============================================================
 
-### Acquire lock (required before editing existing article)
-POST {{base}}/content/articles/{{articleId}}/lock/
-Authorization: Bearer {{writerToken}}
+### Acquire lock (must hold lock to edit)
+POST {{contentUrl}}/contents/{{contentId}}/lock/
+Authorization: {{writerToken}}
 
 ###
 
 ### Release lock
-DELETE {{base}}/content/articles/{{articleId}}/lock/
-Authorization: Bearer {{writerToken}}
+DELETE {{contentUrl}}/contents/{{contentId}}/lock/
+Authorization: {{writerToken}}
 
-###
 
-# ============================================================
-# CONTENT — ARTICLE DETAIL
-# ============================================================
+### ============================================================
+### STAGE 2 — INTERNAL MEMBER APPROVES
+### ============================================================
 
-### Article detail (latest state)
-GET {{base}}/content/contents/9cf1c0c6-32a1-41cf-ab76-bea612929b06/
-Authorization: Bearer {{writerToken}}
-
-###
-
-# ============================================================
-# CONTENT — VERSIONS
-# ============================================================
-
-### List all versions of an article
-GET {{base}}/content/contents/78449f51-0dfd-435e-82cc-5109211d03b3/history/
-Authorization: Bearer {{writerToken}}
-
-###
-
-### View a SPECIFIC version (full content)
-GET {{base}}/content/articles/78449f51-0dfd-435e-82cc-5109211d03b3/versions/0d757b9a-fa69-4f28-9dbc-5abb3ed125bd/
-Authorization: Bearer {{reviewerToken}}
-
-###
-
-### Latest version
-GET {{base}}/content/articles/{{articleId}}/latest-version/
-Authorization: Bearer {{writerToken}}
-
-###
-
-# ============================================================
-# CONTENT — APPROVAL WORKFLOW
-# ============================================================
-
-### Get notify candidates — who to notify at next stage
-### stage options: pending_executive | pending_admin
-GET {{base}}/content/articles/{{articleId}}/notify-candidates/?stage=pending_executive
-Authorization: Bearer {{reviewerToken}}
-
-###
-
-### Reviewer approves → sends to selected executives
-POST {{base}}/content/articles/{{articleId}}/approve/
-Authorization: Bearer {{reviewerToken}}
+### B1. Internal member approves
+###     → sets internal_approval=True
+###     → automatically notifies ALL executives and ALL admins
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{internalToken}}
 Content-Type: application/json
 
 {
-  "notify_user_ids": ["EXEC_UUID_1", "EXEC_UUID_2"]
+  "action": "approve"
 }
 
 ###
 
-### Executive approves → sends to selected admins
-GET {{base}}/content/articles/{{articleId}}/notify-candidates/?stage=pending_admin
-Authorization: Bearer {{execToken}}
-
-###
-
-POST {{base}}/content/articles/{{articleId}}/approve/
-Authorization: Bearer {{execToken}}
+### B2. Internal member rejects (locks content permanently)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{internalToken}}
 Content-Type: application/json
 
 {
-  "notify_user_ids": ["ADMIN_UUID_1"]
+  "action": "reject",
+  "reason": "Content does not meet our quality standards. Please rewrite the introduction."
+}
+
+
+### ============================================================
+### STAGE 3 — EXECUTIVE (stakeholder_approval) — parallel with admin
+### ============================================================
+
+### C1. Executive approves — stakeholder sign-off
+###     (only allowed after internal_approval=True)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{executiveToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
 }
 
 ###
 
-### Admin publishes (no notify_user_ids needed)
-POST {{base}}/content/articles/{{articleId}}/approve/
+### C2. Executive rejects (locks permanently)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{executiveToken}}
+Content-Type: application/json
+
+{
+  "action": "reject",
+  "reason": "The messaging does not align with our Q3 campaign strategy."
+}
+
+
+### ============================================================
+### STAGE 3 — ADMIN (marketing_approval) — parallel with executive
+### ============================================================
+
+### D1. Admin approves — marketing sign-off
+###     (only allowed after internal_approval=True)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###
+
+### D2. Admin rejects (locks permanently)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "reject",
+  "reason": "SEO requirements not met. Missing primary keyword in title."
+}
+
+
+### ============================================================
+### STAGE 4 — PUBLISH
+###   Option A: Auto-publish fires 24h after all_approved_at is set (Celery)
+###   Option B: Admin publishes immediately once all 3 flags are True
+### ============================================================
+
+### E1. Admin manually publishes (once all 3 approvals are done)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "publish"
+}
+
+
+### ============================================================
+### COMMENTS (any approver — reverts to draft while in_review)
+### ============================================================
+
+### F1. Add a comment (reverts content to draft, resets all approval flags)
+POST {{contentUrl}}/contents/{{contentId}}/comment/
+Authorization: {{internalToken}}
+Content-Type: application/json
+
+{
+  "comment_text": "Please revise the third paragraph — the tone is too informal. @[John Writer]({{internalId}})"
+}
+
+###
+
+### F2. Get comment history for a content piece
+GET {{contentUrl}}/contents/{{contentId}}/comments/history/
+Authorization: {{adminToken}}
+
+###
+
+### F3. Resolve a comment
+PATCH {{contentUrl}}/comments/resolve/{{commentId}}/
+Authorization: {{adminToken}}
+
+###
+
+### F4. Edit your own comment
+PATCH {{contentUrl}}/comments/edit/{{commentId}}/
+Authorization: {{internalToken}}
+Content-Type: application/json
+
+{
+  "comment_text": "Revised feedback: please update the conclusion as well."
+}
+
+###
+
+### F5. Delete your own comment
+DELETE {{contentUrl}}/comments/edit/{{commentId}}/
+Authorization: {{internalToken}}
+
+
+### ============================================================
+### CONTENT DETAIL & LIST VIEWS
+### ============================================================
+
+### G1. Get content detail (includes approval flags, locked_permanently, can_publish_now)
+GET {{contentUrl}}/contents/fcb7e68f-87df-489e-9744-9b171f739d4b/
+Authorization:Bearer {{adminToken}}
+
+###
+
+### G2. Get all active (non-published) content
+GET {{contentUrl}}/contents/active/
+Authorization:Bearer {{adminToken}}
+
+###
+
+### G3. Get all published content
+GET {{contentUrl}}/contents/published/
 Authorization: Bearer {{adminToken}}
-Content-Type: application/json
 
-{}
 
-###
+### ============================================================
+### STAGE-BASED LIST VIEWS (new — 4 stages)
+### ============================================================
 
-# ============================================================
-# CONTENT — SME
-# ============================================================
-
-### Assign SME to article
-POST {{base}}/content/articles/{{articleId}}/assign-sme/
-Authorization: Bearer {{reviewerToken}}
-Content-Type: application/json
-
-{"sme_id": "SME_USER_UUID"}
+### H1. Get all DRAFT content
+GET {{contentUrl}}/contents/stage/draft/
+Authorization:Bearer {{adminToken}}
 
 ###
 
-# ============================================================
-# CONTENT — COMMENTS
-# ============================================================
-
-### Write comment (with @mention)
-POST {{base}}/content/articles/{{articleId}}/comment/
-Authorization: Bearer {{reviewerToken}}
-Content-Type: application/json
-
-{"comment_text": "Great work @[Alice Writer](WRITER_UUID). Please also expand section 2."}
+### H2. Get all IN_REVIEW content
+GET {{contentUrl}}/contents/stage/in_review/
+Authorization:Bearer {{adminToken}}
 
 ###
 
-### Comment history for an article
-GET {{base}}/content/articles/{{articleId}}/comments/history/
-Authorization: Bearer {{reviewerToken}}
+### H3. Get all REJECTED content
+GET {{contentUrl}}/contents/stage/rejected/
+Authorization:Bearer {{adminToken}}
 
 ###
 
-### Edit comment
-PATCH {{base}}/content/comments/edit/{{commentId}}/
-Authorization: Bearer {{reviewerToken}}
-Content-Type: application/json
-
-{"comment_text": "Updated comment text."}
+### H4. Get all PUBLISHED content
+GET {{contentUrl}}/contents/stage/published/
+Authorization:Bearer {{adminToken}}
 
 ###
 
-### Delete comment
-DELETE {{base}}/content/comments/edit/{{commentId}}/
-Authorization: Bearer {{reviewerToken}}
-
-###
-
-# ============================================================
-# CONTENT — LISTS
-# ============================================================
-
-### All active (non-published) articles
-GET {{base}}/content/articles/active/
-Authorization: Bearer {{writerToken}}
-
-###
-
-### All published articles
-GET {{base}}/content/articles/published/
-Authorization: Bearer {{writerToken}}
-
-###
-
-# ============================================================
-# ACCOUNTS
-# ============================================================
-
-### All users
-GET {{base}}/accounts/users/all/
+### H5. Get draft content for a specific campaign
+GET {{contentUrl}}/contents/stage/draft/?campaign_id=fcb7e68f-87df-489e-9744-9b171f739d4b
 Authorization: Bearer {{adminToken}}
 
 ###
 
-### Pending users (no role)
-GET {{base}}/accounts/users/pending/
+### H6. Get in_review content by a specific author
+GET {{contentUrl}}/contents/stage/in_review/?author_id={{internalId}}
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### STATS — COUNT PER STAGE
+### ============================================================
+
+### I1. Global stats across all content
+GET {{contentUrl}}/contents/stats/
+Authorization:Bearer {{adminToken}}
+
+###
+
+### I2. Stats for a specific campaign
+GET {{contentUrl}}/contents/stats/?campaign_id={{campaignId}}
+Authorization: {{adminToken}}
+
+###
+
+### I3. Stats for a specific author
+GET {{contentUrl}}/contents/stats/?author_id=b08cf5df-c9be-4f1d-b12a-60ae5da0afd6
 Authorization: Bearer {{adminToken}}
 
 ###
 
-### Assign role to user
-POST {{base}}/accounts/users/assign/USER_UUID/
-Authorization: Bearer {{adminToken}}
+### I4. Stats for campaign + author
+GET {{contentUrl}}/contents/stats/?campaign_id={{campaignId}}&author_id={{internalId}}
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### FILTER / ANALYTICS
+### ============================================================
+
+### J1. Filter by content type
+GET {{contentUrl}}/contents/filter/?content_type=blog
+Authorization:Bearer {{adminToken}}
+
+###
+
+### J2. Filter by status
+GET {{contentUrl}}/contents/filter/?status=in_review
+Authorization: {{adminToken}}
+
+###
+
+### J3. Filter by status=rejected (locked content)
+GET {{contentUrl}}/contents/filter/?status=rejected
+Authorization: {{adminToken}}
+
+###
+
+### J4. Filter by tags
+GET {{contentUrl}}/contents/filter/?tags=seo,product
+Authorization: {{adminToken}}
+
+###
+
+### J5. Filter by year
+GET {{contentUrl}}/contents/filter/?year=2026
+Authorization:Bearer {{adminToken}}
+
+###
+
+### J6. Filter by year + quarter with period breakdown
+GET {{contentUrl}}/contents/filter/?year=2025&quarter=2&group_by=period
+Authorization:Bearer {{adminToken}}
+
+###
+
+### J7. Filter by year + month
+GET {{contentUrl}}/contents/filter/?year=2025&month=7
+Authorization: {{adminToken}}
+
+###
+
+### J8. Combined filter
+GET {{contentUrl}}/contents/filter/?content_type=blog&status=published&campaign_id={{campaignId}}&year=2025&group_by=period
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### VERSIONS
+### ============================================================
+
+### K1. Get version history
+GET {{contentUrl}}/contents/{{contentId}}/history/
+Authorization: {{adminToken}}
+
+###
+
+### K2. Get a specific version
+GET {{contentUrl}}/contents/{{contentId}}/versions/{{versionId}}/
+Authorization: {{adminToken}}
+
+###
+
+### K3. Get latest version
+GET {{contentUrl}}/contents/{{contentId}}/latest-version/
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### EXECUTIVE INITIATION FLOW
+### ============================================================
+
+### L1. Executive initiates a content piece
+POST {{contentUrl}}/contents/initiate/
+Authorization: {{executiveToken}}
 Content-Type: application/json
 
-{"group": "internal", "role": "writer"}
+{
+  "title": "Q3 Product Launch Blog",
+  "brief": "A blog post announcing our Q3 product launch with key features and benefits.",
+  "content_type": "blog",
+  "campaign_id": "{{campaignId}}",
+  "tags": "product,launch,q3",
+  "event_id": "{{eventId}}"
+}
 
-###
 
-### Search users (for @mention dropdown)
-GET {{base}}/accounts/users/search/?q=alice
-Authorization: Bearer {{writerToken}}
+### ============================================================
+### SME ASSIGNMENT
+### ============================================================
 
-###
+### M1. Assign SME to content
+POST {{contentUrl}}/contents/{{contentId}}/assign-sme/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "sme_id": "{{smeId}}"
+}
+
+
+### ============================================================
+### NOTIFY CANDIDATES
+### ============================================================
+
+### N1. Manually notify users about content
+POST {{contentUrl}}/contents/{{contentId}}/notify-candidates/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "notify_user_ids": ["{{internalId}}", "{{executiveId}}"]
+}
+
+
+### ============================================================
+### FULL HAPPY-PATH FLOW (copy & run in order)
+### ============================================================
+
+### STEP 1 — Writer creates draft
+# POST {{contentUrl}}/contents/save/  (no content_id, submit=false)
+
+### STEP 2 — Writer acquires lock
+# POST {{contentUrl}}/contents/{{contentId}}/lock/
+
+### STEP 3 — Writer submits for review (status → in_review)
+# POST {{contentUrl}}/contents/save/  (submit=true, notify_user_ids=[internal_member_id])
+
+### STEP 4 — Internal member approves (→ notifies all execs + admins automatically)
+# POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "approve"}  (as internal)
+
+### STEP 5a — Executive approves (parallel)
+# POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "approve"}  (as executive)
+
+### STEP 5b — Admin approves (parallel) — once both done, all_approved_at is stamped
+# POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "approve"}  (as admin)
+
+### STEP 6 — Either:
+#   a) Wait 24h for auto-publish (Celery fires auto_publish_content_task)
+#   b) Admin clicks publish now
+#      POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "publish"}  (as admin)
+
+
+### ============================================================
+### REJECTION FLOW
+### ============================================================
+
+### STEP 1-3 same as happy path above
+
+### STEP 4 — Anyone rejects (content locked permanently)
+# POST {{contentUrl}}/contents/{{contentId}}/approve/
+# {"action": "reject", "reason": "Does not meet brand guidelines."}
+
+### STEP 5 — Verify content is locked
+# GET {{contentUrl}}/contents/{{contentId}}/
+# → locked_permanently: true, status: "rejected"
+
+### STEP 6 — Attempting to lock or edit returns 423
+# POST {{contentUrl}}/contents/{{contentId}}/lock/
+# → 423 "Content is permanently locked due to rejection"
+
+
+### ============================================================
+### COMMENT REVERTS-TO-DRAFT FLOW
+### ============================================================
+
+### STEP 1-4 same as happy path (up to internal approval)
+
+### STEP 5 — Admin/Executive adds comment while in_review
+# POST {{contentUrl}}/contents/{{contentId}}/comment/
+# {"comment_text": "Please revise the title."}
+# → new_status: "draft", all approval flags reset
+
+### STEP 6 — Writer must resubmit (go back to STEP 2)
