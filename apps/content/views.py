@@ -101,65 +101,6 @@ def _notify_exec_and_admin(content):
 #         return Response(serializer.data)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1b. STAGE-BASED LIST VIEWS
-#   GET /api/content/contents/stage/<stage>/
-#   stage ∈ draft | in_review | rejected | published
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-#no need
-# @extend_schema(
-#     tags=["Content – Stages"],
-#     description=(
-#         "Return all content pieces for a given stage."
-#         "Valid stages: `draft` | `in_review` | `approved` | `rejected` | `published`\n\n"
-#         "Optional query params: `campaign_id`, `author_id`"
-#     ),
-#     parameters=[
-#         OpenApiParameter("campaign_id", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
-#         OpenApiParameter("author_id",   OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False),
-#     ],
-# )
-# class ContentByStageView(APIView):
-#     """
-#     GET /api/content/contents/stage/<stage>/
-
-#     Returns content list for a specific stage (draft/in_review/approved/rejected/published).
-#     """
-#     permission_classes = [HasRBACPermission]
-#     required_area  = "content"
-#     required_roles = ["read", "feedback", "admin"]
-
-#     VALID_STAGES = {"draft", "in_review", "approved", "rejected", "published"}
-
-#     def get(self, request, stage):
-#         if stage not in self.VALID_STAGES:
-#             return Response(
-#                 {"error": f"Invalid stage '{stage}'. Valid: {sorted(self.VALID_STAGES)}"},
-#                 status=400,
-#             )
-
-#         qs = Content.objects.filter(status=stage).select_related("author").order_by("-updated_at")
-
-#         campaign_id = request.query_params.get("campaign_id", "").strip()
-#         author_id   = request.query_params.get("author_id", "").strip()
-#         if campaign_id:
-#             qs = qs.filter(campaign_id=campaign_id)
-#         if author_id:
-#             qs = qs.filter(author__user_id=author_id)
-
-#         serializer = ContentSerializer(qs, many=True)
-#         return Response({
-#             "stage": stage,
-#             "count": qs.count(),
-#             "items": serializer.data,
-#         })
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. CONTENT DETAIL
-# ─────────────────────────────────────────────────────────────────────────────
 
 @extend_schema(tags=["Content"])
 class ContentDetailView(APIView):
@@ -292,7 +233,7 @@ class ContentLock(APIView):
         }
     )}
 )
-class CreateTaskForContentView(APIView):
+class CreateNewContentView(APIView):
     """
     POST /api/content/contents/create-task/
 
@@ -318,6 +259,7 @@ class CreateTaskForContentView(APIView):
         campaign_id  = request.data.get("campaign_id", "").strip()
         event_id = request.data.get("event_id") or None
         content_type = request.data.get("content_type", "").strip()
+        tags = request.get("tags").strip(",")
 
         if not title:
             return Response({"error": "title is required."}, status=400)
@@ -366,6 +308,30 @@ class CreateTaskForContentView(APIView):
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. UNIFIED SAVE VIEW (writer creates draft / submits for review)
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+class newcontent(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["write", "update"]
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
+
+    def post(self, request):
+        title = request.data.get("title", "").strip()
+        body = request.data.get("body", "").strip()
+        content_id = request.data.get("content_id")
+        task_id= request.data.get("task_id")
+        content_type = request.get("content_type")
+        
+        
+
+        submit = request.data.get("submit", False)
+        notify_ids = request.data.get("notify_user_ids", [])
+        image_file = request.FILES.get("image")
+
+
 
 @extend_schema(
     tags=["Content"],
@@ -754,40 +720,40 @@ class NotifyCandidatesView(APIView):
 # 6b/6c. CAMPAIGN & EVENT DROPDOWNS
 # ─────────────────────────────────────────────────────────────────────────────
 
-@extend_schema(tags=["Content"])
-class CampaignListView(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+# @extend_schema(tags=["Content"])
+# class CampaignListView(APIView):
+#     permission_classes = [HasRBACPermission]
+#     required_area  = "content"
+#     required_roles = ["read", "write", "feedback", "admin"]
 
-    def get(self, request):
-        from board.models import Campaign
-        try:
-            campaigns = Campaign.objects.order_by("title")
-            return Response([
-            {"campaign_id": str(c.pk), "title": c.title}
-            for c in campaigns
-            ])
-        except Exception as e:
-            return Response({"error": str(e)})
+#     def get(self, request):
+#         from board.models import Campaign
+#         try:
+#             campaigns = Campaign.objects.order_by("title")
+#             return Response([
+#             {"campaign_id": str(c.pk), "title": c.title}
+#             for c in campaigns
+#             ])
+#         except Exception as e:
+#             return Response({"error": str(e)})
 
 
-@extend_schema(tags=["Content"])
-class EventListView(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+# @extend_schema(tags=["Content"])
+# class EventListView(APIView):
+#     permission_classes = [HasRBACPermission]
+#     required_area  = "content"
+#     required_roles = ["read", "write", "feedback", "admin"]
 
-    def get(self, request):
-        from board.models import Event
-        campaign_id = request.query_params.get("campaign_id")
-        qs = Event.objects.all()
-        if campaign_id:
-            qs = qs.filter(campaign_id=campaign_id)
-        return Response([
-            {"event_id": str(e.pk), "title": e.title}
-            for e in qs.order_by("title")
-        ])
+#     def get(self, request):
+#         from board.models import Event
+#         campaign_id = request.query_params.get("campaign_id")
+#         qs = Event.objects.all()
+#         if campaign_id:
+#             qs = qs.filter(campaign_id=campaign_id)
+#         return Response([
+#             {"event_id": str(e.pk), "title": e.title}
+#             for e in qs.order_by("title")
+#         ])
 
 
 
@@ -854,31 +820,6 @@ class OnlyReviewerListView(APIView):
         ])
 
 
-# @extend_schema(tags=["Content"])
-# class AssignSMEView(APIView):
-#     permission_classes = [HasRBACPermission]
-#     required_area  = "content"
-#     required_roles = ["admin", "promote"]
-
-#     def post(self, request, content_id):
-#         sme_id = request.data.get("sme_id")
-#         try:
-#             with transaction.atomic():
-#                 c   = Content.objects.select_for_update().get(content_id=content_id)
-#                 sme = User.objects.get(user_id=sme_id, role="sme")
-#                 assignment, created = ContentAssignment.objects.get_or_create(
-#                     content=c, sme=sme,
-#                     defaults={"assigned_by": request.user, "executive": request.user}
-#                 )
-#                 if created:
-#                     from content.tasks import send_sme_assignment_email_task
-#                     send_sme_assignment_email_task.delay(str(c.content_id))
-#                     return Response({"message": f"Assigned {sme.full_name}."})
-#                 return Response({"error": "SME already assigned."}, status=400)
-#         except Content.DoesNotExist:
-#             return Response({"error": "Content not found."}, status=404)
-#         except User.DoesNotExist:
-#             return Response({"error": "SME not found."}, status=404)
 @extend_schema(tags=["Content"])
 class AssignSMEndExeView(APIView):
     permission_classes = [HasRBACPermission]
