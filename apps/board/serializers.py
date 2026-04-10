@@ -23,7 +23,7 @@ class CampaignSerializer(serializers.ModelSerializer):
         return obj.events.count()
 
     def get_task_count(self, obj):
-        return obj.tasks.count()
+        return obj.task.count()
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -44,7 +44,7 @@ class EventSerializer(serializers.ModelSerializer):
         read_only_fields = ["event_id", "created_by", "created_at", "updated_at"]
 
     def get_task_count(self, obj):
-        return obj.tasks.count()
+        return obj.task.count()
 
 
 class DiscussionSerializer(serializers.ModelSerializer):

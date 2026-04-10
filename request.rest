@@ -8,6 +8,9 @@
 ### ============================================================
 
 @baseUrl = http://localhost:8000/api
+
+@boarUrl = {{baseUrl}}/board
+
 @contentUrl = {{baseUrl}}/content
 
 ### Auth tokens — obtain from login endpoints
@@ -573,6 +576,172 @@ Content-Type: application/json
 {
   "notify_user_ids": ["{{internalId}}", "{{executiveId}}"]
 }
+
+
+###
+GET {{contentUrl}}/contents/sme
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/exe
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/writer
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/reviewer
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+
+
+
+
+
+# ============================================================
+# KANBAN BOARD — NEW ENDPOINTS (tags, priority, marketing_type, due_date)
+# ============================================================
+
+###
+GET {{boarUrl}}/campaigns/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/events
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Create task with all new fields
+POST {{base}}/board/tasks/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "title":          "Design social media campaign",
+  "description":    "Create assets for Q2 launch campaign across all platforms.",
+  "assigned_to":    3,
+  "tags":           "design,social,q2,launch",
+  "priority":       "high",
+  "marketing_type": "Social Media",
+  "due_date":       "2026-04-15"
+}
+
+### Update task metadata (tags, priority, marketing_type, due_date)
+# Only task creator, last transferrer, or admin can do this
+PATCH {{base}}/board/tasks/1/update/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "tags":           "design,social,q2,revised",
+  "priority":       "medium",
+  "marketing_type": "Email Campaign",
+  "due_date":       "2026-04-20"
+}
+
+### Update just the title
+PATCH {{base}}/board/tasks/1/update/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "title": "Updated Campaign Design Task"
+}
+
+### Update status only (existing endpoint — now supports blocked + approved)
+PATCH {{base}}/board/tasks/1/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "status": "blocked"
+}
+
+
+###
+PATCH {{base}}/board/tasks/1/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "status": "approved"
+}
+
+# ============================================================
+# BOARD — FILTER & SEARCH
+# ============================================================
+
+### Search by title keyword
+GET {{base}}/board/tasks/filter/?search=campaign
+Authorization: Bearer {{writerToken}}
+
+### Filter by status
+GET {{base}}/board/tasks/filter/?status=blocked
+Authorization: Bearer {{writerToken}}
+
+### Filter by priority
+GET {{base}}/board/tasks/filter/?priority=high
+Authorization: Bearer {{writerToken}}
+
+### Filter by marketing type
+GET {{base}}/board/tasks/filter/?marketing_type=social
+Authorization: Bearer {{writerToken}}
+
+### Filter by assigned user
+GET {{base}}/board/tasks/filter/?assigned_to=3
+Authorization: Bearer {{writerToken}}
+
+### Filter by exact due date
+GET {{base}}/board/tasks/filter/?due_date=2026-04-15
+Authorization: Bearer {{writerToken}}
+
+### Filter tasks due before a date
+GET {{base}}/board/tasks/filter/?due_before=2026-05-01
+Authorization: Bearer {{writerToken}}
+
+### Filter tasks due after a date
+GET {{base}}/board/tasks/filter/?due_after=2026-04-01
+Authorization: Bearer {{writerToken}}
+
+### Filter by tag
+GET {{base}}/board/tasks/filter/?tags=design
+Authorization: Bearer {{writerToken}}
+
+### Combine multiple filters (high priority + not yet done + due soon)
+GET {{base}}/board/tasks/filter/?priority=high&status=in_progress&due_before=2026-05-01
+Authorization: Bearer {{writerToken}}
+
+### Search + filter combo
+GET {{base}}/board/tasks/filter/?search=campaign&priority=high&assigned_to=3
+Authorization: Bearer {{writerToken}}
+
+### Full filter — every param at once
+GET {{base}}/board/tasks/filter/?search=design&status=in_progress&priority=high&marketing_type=social&assigned_to=3&due_before=2026-05-01&tags=q2
+Authorization: Bearer {{writerToken}}
+
+
+
+
+
 
 
 ### ============================================================

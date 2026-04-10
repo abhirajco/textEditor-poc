@@ -13,6 +13,7 @@ class Content(models.Model):
         ("draft",  "Draft"),
         ("in_review",  "In Review"),
         ("rejected",   "Rejected"),
+        ("approved",   "Approved"),
         ("published",  "Published"),
     ]
 

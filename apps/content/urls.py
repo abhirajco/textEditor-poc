@@ -1,8 +1,8 @@
 from django.urls import path
 from .views import (
     # Lists
-    ActiveContentListView, PublishedContentListView,
-    ContentByStageView,
+#     ActiveContentListView, PublishedContentListView,
+#     ContentByStageView,
 
     # Detail + lock
     ContentDetailView, ContentLock,
@@ -23,20 +23,32 @@ from .views import (
 
     # Analytics
     ContentStatsView, ContentFilterView,
+
+    #list of role
+    SMEListView , ExeListView , WriterListView , OnlyReviewerListView
 )
 
 urlpatterns = [
 
     # ── Lists ─────────────────────────────────────────────────────────────────
-    path("contents/active/",    ActiveContentListView.as_view(),    name="active-contents"),
-    path("contents/published/", PublishedContentListView.as_view(), name="published-contents"),
+    #path("contents/active/",    ActiveContentListView.as_view(),    name="active-contents"),
+    #path("contents/published/", PublishedContentListView.as_view(), name="published-contents"),
 
     # ── Stage-based lists (4 stages: draft | in_review | rejected | published) ─
     # GET /api/content/contents/stage/draft/
     # GET /api/content/contents/stage/in_review/
     # GET /api/content/contents/stage/rejected/
     # GET /api/content/contents/stage/published/
-    path("contents/stage/<str:stage>/", ContentByStageView.as_view(), name="content-by-stage"),
+    #path("contents/stage/<str:stage>/", ContentByStageView.as_view(), name="content-by-stage"),
+    
+
+
+    #LIST od all the roles
+    path("contents/sme" , SMEListView.as_view()),
+    path("contents/exe" , ExeListView.as_view()),
+    path("contents/writer" , WriterListView.as_view()),
+    path("contents/reviewer" , OnlyReviewerListView.as_view()),
+
 
     # ── Analytics / Stats ─────────────────────────────────────────────────────
     # GET /api/content/contents/stats/

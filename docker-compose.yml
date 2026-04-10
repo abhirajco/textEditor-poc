@@ -7,8 +7,8 @@ services:
     container_name: platform_postgres
     restart: always
     environment:
-      POSTGRES_DB:       platform_db
-      POSTGRES_USER:     platform_user
+      POSTGRES_DB:   platform_db
+      POSTGRES_USER: platform_user
       POSTGRES_PASSWORD: platform_pass
     ports:
       - "5432:5432"
