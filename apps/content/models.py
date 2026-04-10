@@ -338,37 +338,37 @@ class CommentMention(models.Model):
 # ---------------------------------------------------------------------------
 
 class ContentInitiationForm(models.Model):
-    form_id      = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    title        = models.CharField(max_length=255)
-    brief        = models.TextField(help_text="What the content should be about")
-    sme          = models.ForeignKey(
+    form_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=255)
+    brief = models.TextField(help_text="What the content should be about")
+    sme  = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         limit_choices_to={"role": "sme"},
         related_name="initiated_as_sme",
     )
-    created_by   = models.ForeignKey(
+    created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         limit_choices_to={"role": "executive"},
         related_name="initiated_forms",
     )
     content_type = models.TextField(help_text="Mention the type of content")
-    campaign     = models.ForeignKey(
+    campaign = models.ForeignKey(
         "board.Campaign",
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name="contents",
     )
-    event        = models.ForeignKey(
+    event  = models.ForeignKey(
         "board.Event",
         on_delete=models.SET_NULL,
         null=True, blank=True,
         related_name="contents",
     )
-    created_at   = models.DateTimeField(auto_now_add=True)
-    content      = models.OneToOneField(
+    created_at = models.DateTimeField(auto_now_add=True)
+    content  = models.OneToOneField(
         "Content",
         on_delete=models.SET_NULL,
         null=True, blank=True,

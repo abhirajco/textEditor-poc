@@ -10,7 +10,7 @@ from .views import (
     # Workflow
     SaveContentView, InitiateContentView,
     ReviewerListView, NotifyCandidatesView,
-    AssignSMEView, ApproveContent,
+    AssignSMEndExeView, ApproveContent,
 
     # Versions
     ContentVersionHistory, ContentVersionDetailView, LatestVersionView,
@@ -25,22 +25,12 @@ from .views import (
     ContentStatsView, ContentFilterView,
 
     #list of role
-    SMEListView , ExeListView , WriterListView , OnlyReviewerListView
+    SMEListView , ExeListView , WriterListView , OnlyReviewerListView,
+
+    FormListView
 )
 
 urlpatterns = [
-
-    # ── Lists ─────────────────────────────────────────────────────────────────
-    #path("contents/active/",    ActiveContentListView.as_view(),    name="active-contents"),
-    #path("contents/published/", PublishedContentListView.as_view(), name="published-contents"),
-
-    # ── Stage-based lists (4 stages: draft | in_review | rejected | published) ─
-    # GET /api/content/contents/stage/draft/
-    # GET /api/content/contents/stage/in_review/
-    # GET /api/content/contents/stage/rejected/
-    # GET /api/content/contents/stage/published/
-    #path("contents/stage/<str:stage>/", ContentByStageView.as_view(), name="content-by-stage"),
-    
 
 
     #LIST od all the roles
@@ -67,6 +57,11 @@ urlpatterns = [
     # POST /api/content/contents/initiate/
     path("contents/initiate/", InitiateContentView.as_view(), name="content-initiate"),
 
+    #GET /api/content/initiation-forms/
+     # GET /api/content/initiation-forms/?sme_id=uuid
+     #GET /api/content/initiation-forms/?campaign_id=1
+     #GET /api/content/initiation-forms/?created_by=uuid
+    path("contents/form/" , FormListView.as_view() , name="form"),
     # ── Dropdown helpers ──────────────────────────────────────────────────────
     path("campaigns/active/", CampaignListView.as_view(), name="campaigns-active"),
     path("events/",           EventListView.as_view(),    name="events-list"),
@@ -89,7 +84,7 @@ urlpatterns = [
          NotifyCandidatesView.as_view(), name="notify-candidates"),
 
     # ── Workflow ──────────────────────────────────────────────────────────────
-    path("contents/<uuid:content_id>/assign-sme/", AssignSMEView.as_view(), name="assign-sme"),
+    path("contents/<uuid:content_id>/assign-sme/", AssignSMEndExeView.as_view(), name="assign-sme"),
 
     # POST /api/content/contents/<id>/approve/
     #   body: { "action": "approve" | "reject" | "publish", "reason": "..." }

@@ -36,8 +36,8 @@ from drf_spectacular.utils import (
 )
 from rest_framework import serializers as drf_serializers
 
-from .models import Content, ContentAssignment, ContentComment, ContentVersion, CommentMention, ContentHistory
-from .serializers import ContentSerializer
+from .models import Content, ContentAssignment, ContentComment, ContentVersion, CommentMention, ContentHistory, ContentInitiationForm
+from .serializers import ContentSerializer, ContentInitiationFormSerializer
 from accounts.models import User
 from utils.notifications.services import handle_mentions_and_notifications
 from utils.permissions.base import HasRBACPermission
@@ -603,9 +603,10 @@ class InitiateContentView(APIView):
         campaign_id  = request.data.get("campaign_id", "").strip()
         tags   = request.data.get("tags", "").strip()
         event_id = request.data.get("event_id") or None
+        sme_id = request.data.get("sme_id")
 
-        if not all([title, brief, content_type, campaign_id]):
-            return Response({"error": "title, brief, content_type, campaign_id are required."}, status=400)
+        if not all([title, brief, content_type, campaign_id, sme_id]):
+            return Response({"error": "title, brief, content_type, campaign_id and sme id are required."}, status=400)
 
         try:
             campaign = Campaign.objects.get(pk=campaign_id)
@@ -626,8 +627,7 @@ class InitiateContentView(APIView):
                     title       = f"[Content] {title}",
                     campaign    = campaign,
                     event       = event,
-                    created_by  = request.user,
-                    status      = "todo",
+                    assigned_by  = request.user,
                 )
                 content = Content.objects.create(
                     title        = title,
@@ -643,15 +643,69 @@ class InitiateContentView(APIView):
                 ContentHistory.objects.create(
                     content=content, action_type="initiated", performed_by=request.user
                 )
+                sme_user = User.objects.get(pk=sme_id, role="sme")
+                form = ContentInitiationForm.objects.create(
+                    title=title,
+                    brief=brief,
+                    sme=sme_user,
+                    created_by=request.user,
+                    content_type=content_type,
+                    campaign=campaign,
+                    event=event,
+                    content=content,  # linking content
+                )
                 return Response({
+                    "form_id": str(form.form_id),
                     "content_id": str(content.content_id),
                     "task_id":    str(task.pk),
+                    "sme_id": sme_id,
+                    "executive_id": request.user.user_id,
                     "status":     content.status,
                     "message":    "Content initiated.",
                 }, status=201)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+
+@extend_schema(tags=["Content"])
+class FormListView(APIView):
+    """
+    GET /api/content/initiation-forms/
+    View all initiation forms
+    """
+    permission_classes = [HasRBACPermission]
+    required_area = "content"
+    required_roles = ["read"]  # adjust if needed
+
+    def get(self, request):
+        try:
+            queryset = ContentInitiationForm.objects.select_related(
+                "sme", "created_by", "content", "campaign", "event"
+            ).all()
+
+            
+            sme_id = request.query_params.get("sme_id")
+            campaign_id = request.query_params.get("campaign_id")
+            created_by = request.query_params.get("created_by")
+
+            if sme_id:
+                queryset = queryset.filter(sme__user_id=sme_id)
+
+            if campaign_id:
+                queryset = queryset.filter(campaign__campaign_id=campaign_id)
+
+            if created_by:
+                queryset = queryset.filter(created_by__user_id=created_by)
+
+            serializer = ContentInitiationFormSerializer(queryset, many=True)
+
+            return Response({
+                "count": queryset.count(),
+                "results": serializer.data
+            })
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. REVIEWER LIST
@@ -800,32 +854,93 @@ class OnlyReviewerListView(APIView):
         ])
 
 
+# @extend_schema(tags=["Content"])
+# class AssignSMEView(APIView):
+#     permission_classes = [HasRBACPermission]
+#     required_area  = "content"
+#     required_roles = ["admin", "promote"]
+
+#     def post(self, request, content_id):
+#         sme_id = request.data.get("sme_id")
+#         try:
+#             with transaction.atomic():
+#                 c   = Content.objects.select_for_update().get(content_id=content_id)
+#                 sme = User.objects.get(user_id=sme_id, role="sme")
+#                 assignment, created = ContentAssignment.objects.get_or_create(
+#                     content=c, sme=sme,
+#                     defaults={"assigned_by": request.user, "executive": request.user}
+#                 )
+#                 if created:
+#                     from content.tasks import send_sme_assignment_email_task
+#                     send_sme_assignment_email_task.delay(str(c.content_id))
+#                     return Response({"message": f"Assigned {sme.full_name}."})
+#                 return Response({"error": "SME already assigned."}, status=400)
+#         except Content.DoesNotExist:
+#             return Response({"error": "Content not found."}, status=404)
+#         except User.DoesNotExist:
+#             return Response({"error": "SME not found."}, status=404)
 @extend_schema(tags=["Content"])
-class AssignSMEView(APIView):
+class AssignSMEndExeView(APIView):
     permission_classes = [HasRBACPermission]
-    required_area  = "content"
+    required_area = "content"
     required_roles = ["admin", "promote"]
 
     def post(self, request, content_id):
         sme_id = request.data.get("sme_id")
+        executive_id = request.data.get("executive_id")
+
+        if not sme_id or not executive_id:
+            return Response(
+                {"error": "sme_id and executive_id are required."},
+                status=400
+            )
+
         try:
             with transaction.atomic():
-                c   = Content.objects.select_for_update().get(content_id=content_id)
+                # Lock content row
+                content = Content.objects.select_for_update().get(content_id=content_id)
+
+                # Validate SME
                 sme = User.objects.get(user_id=sme_id, role="sme")
+
+                # Validate Executive
+                executive = User.objects.get(user_id=executive_id, role="executive")
+
+                # Create assignment
                 assignment, created = ContentAssignment.objects.get_or_create(
-                    content=c, sme=sme,
-                    defaults={"assigned_by": request.user, "executive": request.user}
+                    content=content,
+                    sme=sme,
+                    executive=executive,
+                    defaults={
+                        "assigned_by": request.user,
+                    }
                 )
-                if created:
-                    from content.tasks import send_sme_assignment_email_task
-                    send_sme_assignment_email_task.delay(str(c.content_id))
-                    return Response({"message": f"Assigned {sme.full_name}."})
-                return Response({"error": "SME already assigned."}, status=400)
+
+                if not created:
+                    return Response(
+                        {"error": "This SME is already assigned to this content under this executive."},
+                        status=400
+                    )
+
+                # Trigger async task
+                from content.tasks import send_sme_assignment_email_task
+                send_sme_assignment_email_task.delay(str(content.content_id))
+
+                return Response({
+                    "message": f"{sme.full_name} assigned under {executive.full_name}."
+                })
+
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
-        except User.DoesNotExist:
-            return Response({"error": "SME not found."}, status=404)
 
+        except User.DoesNotExist:
+            return Response({"error": "Invalid SME or Executive."}, status=404)
+
+        except Exception as e:
+            return Response(
+                {"error": "Something went wrong.", "details": str(e)},
+                status=500
+            )
 
 
 ###in this have to add, if any change is made then have to remove from the auto scheduling

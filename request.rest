@@ -21,7 +21,7 @@
 
 ### IDs — fill in after running create/list calls
 @contentId    = 00000000-0000-0000-0000-000000000000
-@campaignId   = 1
+@campaignId   = 70d98ae1-25fc-4fe6-b519-ac5469f44eda
 @eventId      = 1
 @versionId    = 00000000-0000-0000-0000-000000000000
 @commentId    = 00000000-0000-0000-0000-000000000000
@@ -537,7 +537,7 @@ Authorization: {{adminToken}}
 
 ### L1. Executive initiates a content piece
 POST {{contentUrl}}/contents/initiate/
-Authorization: {{executiveToken}}
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
@@ -546,10 +546,26 @@ Content-Type: application/json
   "content_type": "blog",
   "campaign_id": "{{campaignId}}",
   "tags": "product,launch,q3",
-  "event_id": "{{eventId}}"
+  "sme_id": "38a3b6a2-6dc4-4b3a-aaab-0a89ef2fc9fe"
 }
 
+###
+GET {{contentUrl}}/contents/form/?sme_id=38a3b6a2-6dc4-4b3a-aaab-0a89ef2fc9fe
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
 
+
+###
+GET {{contentUrl}}/contents/form/?campaign_id=70d98ae1-25fc-4fe6-b519-ac5469f44eda
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+
+###
+GET {{contentUrl}}/contents/form/?created_by=bede01ce-af42-48b9-a548-0d92f43d0431
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
 ### ============================================================
 ### SME ASSIGNMENT
 ### ============================================================
@@ -560,7 +576,8 @@ Authorization: {{adminToken}}
 Content-Type: application/json
 
 {
-  "sme_id": "{{smeId}}"
+  "sme_id": "{{smeId}}",
+  "executive_id": "{{executive_id}}"
 }
 
 
@@ -619,9 +636,29 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 
+# "campaign_id": "70d98ae1-25fc-4fe6-b519-ac5469f44eda",
 
+###
+GET {{contentUrl}}/contents/sme
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
 
+###
+GET {{contentUrl}}/contents/exe
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
 
+###
+GET {{contentUrl}}/contents/writer
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/reviewer
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
 
 
 

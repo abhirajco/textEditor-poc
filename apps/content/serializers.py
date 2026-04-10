@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Content, ContentVersion, ContentAssignment, ContentComment
+from .models import Content, ContentVersion, ContentAssignment, ContentComment, ContentInitiationForm
 
 
 class ContentSerializer(serializers.ModelSerializer):
@@ -75,6 +75,28 @@ class ContentCommentSerializer(serializers.ModelSerializer):
         read_only_fields = ["comment_id", "created_at"]
 
 
+class ContentInitiationFormSerializer(serializers.ModelSerializer):
+    sme_name = serializers.CharField(source="sme.full_name", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.full_name", read_only=True)
+    content_id = serializers.UUIDField(source="content.content_id", read_only=True)
+
+    class Meta:
+        model = ContentInitiationForm
+        fields = [
+            "form_id",
+            "title",
+            "brief",
+            "content_type",
+            "campaign",
+            "event",
+            "sme",
+            "sme_name",
+            "created_by",
+            "created_by_name",
+            "content",
+            "content_id",
+            "created_at",
+        ]
 # from rest_framework import serializers
 # from .models import Content, ContentVersion, ContentAssignment, ContentComment
 
