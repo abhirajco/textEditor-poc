@@ -622,6 +622,8 @@ class TaskFilterSearchView(APIView):
         return Response({"count": qs.count(), "results": serializer.data})
 
 
+
+#2 apis below are not needed, filter thing wil do the work
 @extend_schema(tags=["Board"])
 class MyTasksView(APIView):
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]

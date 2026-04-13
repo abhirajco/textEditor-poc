@@ -97,6 +97,10 @@ class ContentInitiationFormSerializer(serializers.ModelSerializer):
             "content_id",
             "created_at",
         ]
+
+
+
+
 # from rest_framework import serializers
 # from .models import Content, ContentVersion, ContentAssignment, ContentComment
 

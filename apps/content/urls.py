@@ -27,7 +27,7 @@ from .views import (
     #list of role
     SMEListView , ExeListView , WriterListView , OnlyReviewerListView,
 
-    FormListView
+    FormListView, StartFromForm
 )
 
 urlpatterns = [
@@ -62,9 +62,11 @@ urlpatterns = [
      #GET /api/content/initiation-forms/?campaign_id=1
      #GET /api/content/initiation-forms/?created_by=uuid
     path("contents/form/" , FormListView.as_view() , name="form"),
+
+    path("contents/startFromForm/" , StartFromForm.as_View()),
     # ── Dropdown helpers ──────────────────────────────────────────────────────
     path("campaigns/active/", CampaignListView.as_view(), name="campaigns-active"),
-    path("events/",           EventListView.as_view(),    name="events-list"),
+    path("events/", EventListView.as_view(),    name="events-list"),
 
     # ── Reviewer dropdown (internal members) ─────────────────────────────────
     path("contents/reviewers-list/", ReviewerListView.as_view(), name="reviewers-list"),

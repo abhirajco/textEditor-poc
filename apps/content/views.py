@@ -259,7 +259,8 @@ class CreateNewContentView(APIView):
         campaign_id  = request.data.get("campaign_id", "").strip()
         event_id = request.data.get("event_id") or None
         content_type = request.data.get("content_type", "").strip()
-        tags = request.get("tags").strip(",")
+        tags = request.get("tags").stri()
+
 
         if not title:
             return Response({"error": "title is required."}, status=400)
@@ -589,26 +590,26 @@ class InitiateContentView(APIView):
         ##have to add the brief also in the task
         try:
             with transaction.atomic():
-                task = Task.objects.create(
-                    title       = f"[Content] {title}",
-                    campaign    = campaign,
-                    event       = event,
-                    assigned_by  = request.user,
-                )
-                content = Content.objects.create(
-                    title        = title,
-                    body         = brief,
-                    author       = request.user,
-                    status       = "draft",
-                    content_type = content_type,
-                    tags         = tags,
-                    campaign     = campaign,
-                    event        = event,
-                    task_id      = task,
-                )
-                ContentHistory.objects.create(
-                    content=content, action_type="initiated", performed_by=request.user
-                )
+                # task = Task.objects.create(
+                #     title       = f"[Content] {title}",
+                #     campaign    = campaign,
+                #     event       = event,
+                #     assigned_by  = request.user,
+                # )
+                # content = Content.objects.create(
+                #     title        = title,
+                #     body         = brief,
+                #     author       = request.user,
+                #     status       = "draft",
+                #     content_type = content_type,
+                #     tags         = tags,
+                #     campaign     = campaign,
+                #     event        = event,
+                #     task_id      = task,
+                # )
+                # ContentHistory.objects.create(
+                #     content=content, action_type="initiated", performed_by=request.user
+                # )
                 sme_user = User.objects.get(pk=sme_id, role="sme")
                 form = ContentInitiationForm.objects.create(
                     title=title,
@@ -618,16 +619,16 @@ class InitiateContentView(APIView):
                     content_type=content_type,
                     campaign=campaign,
                     event=event,
-                    content=content,  # linking content
+                    # content=content,  # linking content
                 )
                 return Response({
                     "form_id": str(form.form_id),
-                    "content_id": str(content.content_id),
-                    "task_id":    str(task.pk),
+                    # "content_id": str(content.content_id),
+                    # "task_id":    str(task.pk),
                     "sme_id": sme_id,
                     "executive_id": request.user.user_id,
-                    "status":     content.status,
-                    "message":    "Content initiated.",
+                    # "status":     content.status,
+                    "message":    "form submitted",
                 }, status=201)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
@@ -673,6 +674,99 @@ class FormListView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+
+
+
+
+@extend_schema(
+    tags=["Content"],
+    request=inline_serializer(
+        name="InitiateContentRequest",
+        fields={
+            "title":drf_serializers.CharField(),
+            "brief":  drf_serializers.CharField(),
+            "content_type": drf_serializers.CharField(),
+            "campaign_id": drf_serializers.CharField(),
+            "tags":drf_serializers.CharField(required=False, allow_blank=True),
+            "event_id": drf_serializers.CharField(required=False, allow_blank=True, allow_null=True),
+        }
+    )
+)
+class StartFromForm(APIView):
+    """POST /api/content/contents/startFromForm/ — executive fills initiation form."""
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["write", "initiate"]
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
+
+    def post(self, request):
+        # (unchanged logic — kept from original)
+        from board.models import Campaign, Event, Task
+        title  = request.data.get("title", "").strip()
+        brief = request.data.get("brief", "").strip()
+        content_type = request.data.get("content_type", "").strip()
+        campaign_id  = request.data.get("campaign_id", "").strip()
+        tags   = request.data.get("tags", "").strip()
+        event_id = request.data.get("event_id") or None
+        #sme_id = request.data.get("sme_id")  #from the form itself
+        executive_id = request.data.get("created_by")
+
+        ex = User.objects.get(user_id=executive_id, role="exe_approver")
+
+        if not all([title, brief, content_type, campaign_id, sme_id]):
+            return Response({"error": "title, brief, content_type, campaign_id and sme id are required."}, status=400)
+
+        try:
+            campaign = Campaign.objects.get(pk=campaign_id)
+        except Campaign.DoesNotExist:
+            return Response({"error": "Campaign not found."}, status=404)
+
+        event = None
+        if event_id:
+            try:
+                event = Event.objects.get(pk=event_id, campaign=campaign)
+            except Event.DoesNotExist:
+                return Response({"error": "Event not found for this campaign."}, status=404)
+
+        ##have to add the brief also in the task
+        try:
+            with transaction.atomic():
+                task = Task.objects.create(
+                    title       = f"[Content] {title}",
+                    campaign    = campaign,
+                    event       = event,
+                    assigned_to  = request.user,
+                    assigned_by = ex
+                )
+                content = Content.objects.create(
+                    title        = title,
+                    body         = brief,
+                    author       = request.user,
+                    status       = "draft",
+                    content_type = content_type,
+                    tags         = tags,
+                    campaign     = campaign,
+                    event        = event,
+                    task_id      = task,
+                )
+                ContentHistory.objects.create(
+                    content=content, action_type="initiated", performed_by=request.user
+                )
+                # sme_user = User.objects.get(user_id=sme_id, role="sme")
+    
+                return Response({
+                    "content_id": str(content.content_id),
+                    "task_id":    str(task.pk),
+                    "sme_id": sme_id,
+                    "executive_id": executive_id,
+                    "status":     content.status,
+                    "message":    "form submitted",
+                }, status=201)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+        
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. REVIEWER LIST
 # ─────────────────────────────────────────────────────────────────────────────
@@ -845,7 +939,7 @@ class AssignSMEndExeView(APIView):
                 sme = User.objects.get(user_id=sme_id, role="sme")
 
                 # Validate Executive
-                executive = User.objects.get(user_id=executive_id, role="executive")
+                executive = User.objects.get(user_id=executive_id, role="exe_aprover")
 
                 # Create assignment
                 assignment, created = ContentAssignment.objects.get_or_create(
@@ -1485,15 +1579,15 @@ class ContentStatsView(APIView):
     tags=["Content – Analytics"],
     parameters=[
         OpenApiParameter("content_type", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("status",       OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False,
+        OpenApiParameter("status", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False,
                          description="draft | in_review | approved | rejected | published"),
-        OpenApiParameter("author_id",    OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("campaign_id",  OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("tags",         OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("year",         OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("month",        OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("quarter",      OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("group_by",     OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False,
+        OpenApiParameter("author_id",OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("campaign_id", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("tags", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("year", OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("month", OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("quarter",OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("group_by",OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False,
                          description="Pass 'period' for per-period breakdown"),
     ],
 )
