@@ -89,57 +89,57 @@ def send_rejection_email_task(self, content_id, rejected_by_name, reason):
 
 # ── Auto-publish after 24h ────────────────────────────────────────────────────
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def auto_publish_content_task(self, content_id):
-    """
-    Fires 24 hours after all_approved_at is stamped.
-    Publishes the content only if it is still fully approved and not rejected.
-    """
-    try:
-        from content.models import Content, ContentHistory
-        from django.utils import timezone
+# @shared_task(bind=True, max_retries=3, default_retry_delay=60)
+# def auto_publish_content_task(self, content_id):
+#     """
+#     Fires 24 hours after all_approved_at is stamped.
+#     Publishes the content only if it is still fully approved and not rejected.
+#     """
+#     try:
+#         from content.models import Content, ContentHistory
+#         from django.utils import timezone
 
-        c = Content.objects.get(content_id=content_id)
+#         c = Content.objects.get(content_id=content_id)
 
-        # Safety checks — if anything changed in the 24h window, abort.
-        if c.status in ("published", "rejected"):
-            logger.info(f"auto_publish: content {content_id} already in final state {c.status}, skipping.")
-            return
+#         # Safety checks — if anything changed in the 24h window, abort.
+#         if c.status in ("published", "rejected"):
+#             logger.info(f"auto_publish: content {content_id} already in final state {c.status}, skipping.")
+#             return
 
-        if not (c.internal_approval and c.marketing_approval and c.stakeholder_approval):
-            logger.info(f"auto_publish: content {content_id} no longer fully approved, skipping.")
-            return
+#         if not (c.internal_approval and c.marketing_approval and c.stakeholder_approval):
+#             logger.info(f"auto_publish: content {content_id} no longer fully approved, skipping.")
+#             return
 
-        if c.locked_permanently:
-            logger.info(f"auto_publish: content {content_id} is locked permanently, skipping.")
-            return
+#         if c.locked_permanently:
+#             logger.info(f"auto_publish: content {content_id} is locked permanently, skipping.")
+#             return
 
-        c.status = "published"
-        c.save(update_fields=["status"])
+#         c.status = "published"
+#         c.save(update_fields=["status"])
 
-        ContentHistory.objects.create(
-            content      = c,
-            action_type  = "auto_published",
-            performed_by = None,
-            note         = "Auto-published 24 hours after all three approvals were received.",
-        )
+#         ContentHistory.objects.create(
+#             content      = c,
+#             action_type  = "auto_published",
+#             performed_by = None,
+#             note         = "Auto-published 24 hours after all three approvals were received.",
+#         )
 
-        send_mail(
-            subject        = f"Published: '{c.title}'",
-            message        = (
-                f"Hi {c.author.full_name},\n\n"
-                f"Your content '{c.title}' has been automatically published after receiving "
-                f"all required approvals.\n\nCongratulations!"
-            ),
-            from_email     = settings.EMAIL_HOST_USER,
-            recipient_list = [c.author.email],
-            fail_silently  = True,
-        )
-        logger.info(f"auto_publish: content {content_id} published successfully.")
-    except Content.DoesNotExist:
-        logger.error(f"auto_publish: content {content_id} not found.")
-    except Exception as exc:
-        raise self.retry(exc=exc)
+#         send_mail(
+#             subject        = f"Published: '{c.title}'",
+#             message        = (
+#                 f"Hi {c.author.full_name},\n\n"
+#                 f"Your content '{c.title}' has been automatically published after receiving "
+#                 f"all required approvals.\n\nCongratulations!"
+#             ),
+#             from_email     = settings.EMAIL_HOST_USER,
+#             recipient_list = [c.author.email],
+#             fail_silently  = True,
+#         )
+#         logger.info(f"auto_publish: content {content_id} published successfully.")
+#     except Content.DoesNotExist:
+#         logger.error(f"auto_publish: content {content_id} not found.")
+#     except Exception as exc:
+#         raise self.retry(exc=exc)
 
 
 # ── Mention email ─────────────────────────────────────────────────────────────

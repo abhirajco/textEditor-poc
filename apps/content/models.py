@@ -42,7 +42,7 @@ class Content(models.Model):
         null=True, blank=True,
         related_name="content_forms",
     )
-    task_id = models.ForeignKey(
+    task = models.ForeignKey(
         "board.Task",
         on_delete=models.CASCADE,
         related_name="content_forms",
@@ -118,7 +118,7 @@ class Content(models.Model):
         indexes   = [
             models.Index(fields=["locked_by", "status"]),
             models.Index(fields=["author", "status"]),
-            models.Index(fields=["campaign_id", "status"]),
+            models.Index(fields=["campaign", "status"]),
             models.Index(fields=["content_type", "status"]),
         ]
 

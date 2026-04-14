@@ -83,7 +83,7 @@ class ContentDetailView(APIView):
                 "campaign_id":   c.campaign_id,
                 "event_id": c.event_id,
                 # "task_id": str(c.task_id) if c.task_id else None,
-                "task_id": str(c.task_id),
+                "task_id": c.task_id,
                 "author": c.author.full_name,
                 "locked_by": c.locked_by.full_name if c.locked_by else None,
                 "is_locked": is_locked,
@@ -465,8 +465,8 @@ class SubmitContentView(APIView):
                     )
 
                 # ── Guard: only the author may submit ─────────────────────────
-                if c.author != user:
-                    return Response({"error": "Access denied. Only the author can submit this content."}, status=403)
+                # if c.author != user:
+                #     return Response({"error": "Access denied. Only the author can submit this content."}, status=403)
 
                 # ── Guard: lock must be held by the author ────────────────────
                 if c.locked_by is None:
@@ -795,15 +795,15 @@ class NewContentButton(APIView):
                     detail       = f"Task created via content popup for '{title}'.",
                 )
                 content = Content.objects.create(
-                    title        = title,
-                    body         = brief,
-                    author       = request.user,
+                    title  = title,
+                    body    = brief,
+                    author   = request.user,
                     status       = "draft",
                     content_type = content_type,
                     tags         = tags,
                     campaign     = campaign,
                     event        = event,
-                    task_id      = task,
+                    task      = task,
                 )
                 ContentHistory.objects.create(
                     content=content, action_type="initiated", performed_by=request.user
@@ -1037,8 +1037,8 @@ class StartFromForm(APIView):
                     content_type = content_type,
                     tags         = tags,
                     campaign     = campaign,
-                    event        = event,
-                    task_id      = task,
+                    event   = event,
+                    task = task,
                 )
                 ContentHistory.objects.create(
                     content=content, action_type="initiated", performed_by=request.user
