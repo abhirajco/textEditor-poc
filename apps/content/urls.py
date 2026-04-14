@@ -8,6 +8,7 @@ from .views import (
     ContentDetailView, ContentLock,
 
     # Workflow
+    NewContentButton,
     SaveContentView, InitiateContentView,
     ReviewerListView, NotifyCandidatesView,
     AssignSMEndExeView, ApproveContent,
@@ -19,7 +20,7 @@ from .views import (
     WriteComment, ResolveComment, ContentCommentHistoryView, CommentEditDelete,
 
     # Dropdowns
-    CampaignListView, EventListView,
+#     CampaignListView, EventListView,
 
     # Analytics
     ContentStatsView, ContentFilterView,
@@ -27,7 +28,7 @@ from .views import (
     #list of role
     SMEListView , ExeListView , WriterListView , OnlyReviewerListView,
 
-    FormListView, StartFromForm
+    FormListView, StartFromForm, ParticularFormView
 )
 
 urlpatterns = [
@@ -63,10 +64,12 @@ urlpatterns = [
      #GET /api/content/initiation-forms/?created_by=uuid
     path("contents/form/" , FormListView.as_view() , name="form"),
 
-    path("contents/startFromForm/" , StartFromForm.as_View()),
+    path("contents/startFromForm/" , StartFromForm.as_view()),
+
+    path("contents/particularForm/<uuid:form_id>" , ParticularFormView.as_view()),
     # ── Dropdown helpers ──────────────────────────────────────────────────────
-    path("campaigns/active/", CampaignListView.as_view(), name="campaigns-active"),
-    path("events/", EventListView.as_view(),    name="events-list"),
+#     path("campaigns/active/", CampaignListView.as_view(), name="campaigns-active"),
+#     path("events/", EventListView.as_view(),    name="events-list"),
 
     # ── Reviewer dropdown (internal members) ─────────────────────────────────
     path("contents/reviewers-list/", ReviewerListView.as_view(), name="reviewers-list"),
@@ -76,7 +79,7 @@ urlpatterns = [
     #   submit=false → save draft
     #   submit=true  → submit for internal review (status → in_review)
     path("contents/save/", SaveContentView.as_view(), name="content-save"),
-
+       path("contents/new/", NewContentButton.as_view(), name="new-content-button"),
     # ── Detail + Lock ─────────────────────────────────────────────────────────
     path("contents/<uuid:content_id>/",      ContentDetailView.as_view(), name="content-detail"),
     path("contents/<uuid:content_id>/lock/", ContentLock.as_view(),       name="content-lock"),
