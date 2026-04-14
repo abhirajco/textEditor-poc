@@ -284,6 +284,7 @@ class TaskListView(APIView):
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
+      try:
         cached = cache.get(TASK_LIST_CACHE_KEY)
         if cached:
             return Response(json.loads(cached))
@@ -294,6 +295,8 @@ class TaskListView(APIView):
         data = serializer.data
         cache.set(TASK_LIST_CACHE_KEY, json.dumps(data, cls=DjangoJSONEncoder), CACHE_TTL)
         return Response(data)
+      except Exception as e:
+          return Response({"error": str(e)} , status=500)
 
     def post(self, request):
         title = request.data.get("title", "").strip()

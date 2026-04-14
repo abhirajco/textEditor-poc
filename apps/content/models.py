@@ -146,6 +146,7 @@ class ContentAssignment(models.Model):
         on_delete=models.CASCADE,
         limit_choices_to={"role": "sme"},
         related_name="sme_tasks",
+        null= True,
     )
     assigned_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

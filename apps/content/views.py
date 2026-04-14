@@ -41,7 +41,7 @@ from .serializers import ContentSerializer, ContentInitiationFormSerializer
 from accounts.models import User
 from utils.notifications.services import handle_mentions_and_notifications
 from utils.permissions.base import HasRBACPermission
-
+from django.utils import timezone
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -82,7 +82,8 @@ class ContentDetailView(APIView):
                 "tags": c.tags,
                 "campaign_id":   c.campaign_id,
                 "event_id": c.event_id,
-                "task_id": str(c.task_id) if c.task_id else None,
+                # "task_id": str(c.task_id) if c.task_id else None,
+                "task_id": str(c.task_id),
                 "author": c.author.full_name,
                 "locked_by": c.locked_by.full_name if c.locked_by else None,
                 "is_locked": is_locked,
@@ -127,7 +128,7 @@ class ContentLock(APIView):
                     c.internal_approval and c.marketing_approval and c.stakeholder_approval
                     and c.all_approved_at is not None
                 ):
-                    from django.utils import timezone
+                    #from django.utils import timezone
                     elapsed = timezone.now() - c.all_approved_at
                     if elapsed.total_seconds() >= 86400:
                         return Response(
@@ -147,6 +148,8 @@ class ContentLock(APIView):
                 return Response({"message": "Lock acquired."})
             except Content.DoesNotExist:
                 return Response({"error": "Content not found."}, status=404)
+            except Exception as e:
+                return Response({"error": str(e)})
 
     def delete(self, request, content_id):
         try:
@@ -267,7 +270,7 @@ class ContentLock(APIView):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. UNIFIED SAVE VIEW (writer creates draft / submits for review)
+# 4. SAVE VIEW (version creation — draft mode only)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -276,18 +279,11 @@ class ContentLock(APIView):
     request=inline_serializer(
         name="SaveContentRequest",
         fields={
-            "title":           drf_serializers.CharField(),
-            "body":            drf_serializers.CharField(),
-            "content_id":      drf_serializers.UUIDField(required=False),
-            "task_id":         drf_serializers.UUIDField(
-                                   required=False,
-                                   help_text="Required when creating the very first save (ties content to an existing task)."),
-            "image":           drf_serializers.ImageField(required=False),
-            "submit":          drf_serializers.BooleanField(required=False, default=False,
-                                   help_text="True = submit for review (writer → internal approvers)"),
-            "notify_user_ids": drf_serializers.ListField(
-                                   child=drf_serializers.UUIDField(), required=False,
-                                   help_text="Internal member IDs to notify (required when submit=true)"),
+            "title":      drf_serializers.CharField(),
+            "body":       drf_serializers.CharField(),
+            "content_id": drf_serializers.UUIDField(
+                              help_text="ID of the existing draft content to save a new version of."),
+            "image":      drf_serializers.ImageField(required=False),
         }
     )
 )
@@ -295,14 +291,14 @@ class SaveContentView(APIView):
     """
     POST /api/content/contents/save/
 
-    A — No content_id: FIRST save.
-        Requires `task_id` (the writer must have created a task via
-        POST /api/content/contents/create-task/ first).
-        Creates a fresh draft, auto-acquires lock.
-    B — content_id, submit=false: saves draft (lock required).
-    C — content_id, submit=true: submits for internal review.
-         • status → 'in_review'
-         • Notifies the specified internal members (notify_user_ids).
+    Creates a new version of an existing draft content.
+
+    Rules:
+      • content_id is always required 
+      • Content must be in 'draft' status — saving is blocked for any other status.
+      • Content must not be permanently locked (rejected).
+      • The 24-hour post-full-approval edit window must not have expired.
+      • The calling user must be the author and must hold the lock.
     """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
@@ -310,86 +306,31 @@ class SaveContentView(APIView):
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request):
-        title = request.data.get("title", "").strip()
-        body = request.data.get("body", "").strip()
+        title      = request.data.get("title", "").strip()
+        body       = request.data.get("body", "").strip()
         content_id = request.data.get("content_id")
-        task_id= request.data.get("task_id")
-        submit = request.data.get("submit", False)
-        notify_ids = request.data.get("notify_user_ids", [])
         image_file = request.FILES.get("image")
 
         if not title:
             return Response({"error": "title is required."}, status=400)
         if not body:
             return Response({"error": "body is required."}, status=400)
-        if submit and not notify_ids:
-            return Response({"error": "notify_user_ids (internal members) required when submit=true."}, status=400)
+        if not content_id:
+            return Response({"error": "content_id is required."}, status=400)
 
         try:
             with transaction.atomic():
                 user = request.user
-
-                # ── A: New content ────────────────────────────────────────────
-                if not content_id:
-                    # task_id is MANDATORY for first save — the frontend popup
-                    # must call POST /api/content/contents/create-task/ first.
-                    if not task_id:
-                        return Response(
-                            {
-                                "error": "task_id is required to create new content.",
-                                "action": "show_task_creation_popup",
-                                "message": "Please create a task first before saving content.",
-                            },
-                            status=400,
-                        )
-                    from board.models import Task
-                    try:
-                        task = Task.objects.get(pk=task_id)
-                    except Task.DoesNotExist:
-                        return Response({"error": "Task not found."}, status=404)
-
-                    c = Content.objects.create(
-                        title = title,
-                        body = body,
-                        author = user,
-                        status = "draft",
-                        locked_by = user,
-                        locked_at = timezone.now(),
-                        task_id = task,
-                        campaign = task.campaign,
-                        event = task.event,
-                    )
-                    if image_file:
-                        c.image = image_file
-                    c._version_data = {
-                        "title":       title,
-                        "body":        body,
-                        "image_url":   c.image.url if c.image else None,
-                        "changed_by_id": str(user.user_id),
-                    }
-                    c.save()
-                    ContentHistory.objects.create(
-                        content=c, action_type="draft_saved", performed_by=user
-                    )
-                    return Response({
-                        "content_id": str(c.content_id),
-                        "task_id":    str(task.pk),
-                        "campaign_id": str(task.campaign_id),
-                        "message":    "Draft created. Lock auto-acquired.",
-                        "status":     c.status,
-                    }, status=201)
-
-                # ── B / C: Existing content ───────────────────────────────────
                 c = Content.objects.select_for_update().get(content_id=content_id)
 
-                # Reject edits on permanently locked content
+                # ── Guard: permanently locked (rejected) ──────────────────────
                 if c.locked_permanently:
                     return Response(
-                        {"error": "Content is permanently locked due to rejection."},
+                        {"error": "Content is permanently locked due to rejection and cannot be edited."},
                         status=423,
                     )
 
-                # Reject edits after the 24-hour post-approval window
+                # ── Guard: 24-hour post-full-approval window expired ───────────
                 if (
                     c.internal_approval and c.marketing_approval and c.stakeholder_approval
                     and c.all_approved_at is not None
@@ -401,74 +342,384 @@ class SaveContentView(APIView):
                             status=423,
                         )
 
-                is_author = (c.author == user)
-                is_reviewer = (user.role == "reviewer")
-                is_assigned_sme = (
-                    user.role == "sme" and
-                    ContentAssignment.objects.filter(content=c, sme=user).exists()
-                )
-                if not (is_author or is_reviewer or is_assigned_sme):
-                    return Response({"error": "Access denied."}, status=403)
+                # ── Guard: only draft content can be saved ────────────────────
+                # if c.status != "draft":
+                #     return Response(
+                #         {"error": f"Content cannot be saved in '{c.status}' status. Only draft content can be saved."},
+                #         status=400,
+                #     )
 
+                # ── Guard: only the author may save ──────────────────────────
+                # if c.author != user:
+                #     return Response({"error": "Access denied. Only the author can save this content."}, status=403)
+
+                # ── Guard: lock must be held by this user ─────────────────────
                 if c.locked_by is None:
-                    return Response({"error": "Acquire the lock first."}, status=423)
+                    return Response({"error": "Acquire the lock first before saving."}, status=423)
                 if c.locked_by != user:
-                    return Response({"error": f"Locked by {c.locked_by.full_name}."}, status=423)
+                    return Response({"error": f"Content is locked by {c.locked_by.full_name}."}, status=423)
 
+                # ── Apply changes & create version ────────────────────────────
                 c.title = title
                 c.body  = body
                 if image_file:
                     c.image = image_file
 
                 c._version_data = {
-                    "title":       title,
-                    "body":        body,
-                    "image_url":   c.image.url if c.image else None,
+                    "title":         title,
+                    "body":          body,
+                    "image_url":     c.image.url if c.image else None,
                     "changed_by_id": str(user.user_id),
                 }
+                c.save()
 
-                if submit:
-                    # Submit → in_review, notify specified internal members
-                    c.status    = "in_review"
-                    c.locked_by = None
-                    c.locked_at = None
-                    # Reset any prior approval flags
-                    c.internal_approval    = False
-                    c.marketing_approval   = False
-                    c.stakeholder_approval = False
-                    c.all_approved_at      = None
-                    c.save()
-
-                    from content.tasks import send_approval_email_task
-                    send_approval_email_task.delay(
-                        user_ids   = [str(uid) for uid in notify_ids],
-                        content_id = str(c.content_id),
-                        stage      = "in_review",
-                    )
-                    ContentHistory.objects.create(
-                        content=c, action_type="submitted", performed_by=user,
-                        note="Submitted for internal review.",
-                    )
-                    return Response({
-                        "content_id": str(c.content_id),
-                        "status":     c.status,
-                        "message":    "Submitted for internal review. Notified internal members.",
-                    })
-                else:
-                    c.save()
-                    ContentHistory.objects.create(
-                        content=c, action_type="draft_saved", performed_by=user
-                    )
-                    return Response({
-                        "content_id": str(c.content_id),
-                        "status":     c.status,
-                        "message":    "Draft saved.",
-                    })
+                ContentHistory.objects.create(
+                    content=c, action_type="draft_saved", performed_by=user
+                )
+                return Response({
+                    "content_id": str(c.content_id),
+                    "status":     c.status,
+                    "message":    "Draft version saved.",
+                })
 
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
+
+
+# 4b. SUBMIT CONTENT VIEW (draft → preview; notifies internal members)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+
+@extend_schema(
+    tags=["Content"],
+    request=inline_serializer(
+        name="SubmitContentRequest",
+        fields={
+            "content_id": drf_serializers.UUIDField(
+                              help_text="ID of the draft content to submit for internal review."),
+        }
+    )
+)
+class SubmitContentView(APIView):
+    """
+    POST /api/content/contents/submit/
+
+    Submits a draft content for internal review (preview stage).
+
+    On success:
+      • status → 'in_review'
+      • Lock is released.
+      • All prior approval flags are reset.
+      • All internal members with role 'writer' or 'reviewer', except the
+        author, are automatically notified via email.
+      • A ContentHistory record is created with action_type='submitted'.
+
+    Rules:
+      • Content must be in 'draft' status.
+      • Content must not be permanently locked.
+      • The 24-hour post-full-approval window must not have expired.
+      • The calling user must be the author and must hold the lock.
+    """
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["write", "update"]
+
+    def post(self, request):
+        content_id = request.data.get("content_id")
+
+        if not content_id:
+            return Response({"error": "content_id is required."}, status=400)
+
+        try:
+            with transaction.atomic():
+                user = request.user
+                c = Content.objects.select_for_update().get(content_id=content_id)
+
+                # ── Guard: permanently locked ─────────────────────────────────
+                if c.locked_permanently:
+                    return Response(
+                        {"error": "Content is permanently locked due to rejection and cannot be submitted."},
+                        status=423,
+                    )
+
+                # ── Guard: 24-hour post-full-approval window ──────────────────
+                if (
+                    c.internal_approval and c.marketing_approval and c.stakeholder_approval
+                    and c.all_approved_at is not None
+                ):
+                    elapsed = (timezone.now() - c.all_approved_at).total_seconds()
+                    if elapsed >= 86400:
+                        return Response(
+                            {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
+                            status=423,
+                        )
+
+                # ── Guard: only draft content can be submitted ────────────────
+                if c.status != "draft":
+                    return Response(
+                        {"error": f"Only draft content can be submitted. Current status: '{c.status}'."},
+                        status=400,
+                    )
+
+                # ── Guard: only the author may submit ─────────────────────────
+                if c.author != user:
+                    return Response({"error": "Access denied. Only the author can submit this content."}, status=403)
+
+                # ── Guard: lock must be held by the author ────────────────────
+                if c.locked_by is None:
+                    return Response({"error": "Acquire the lock first before submitting."}, status=423)
+                if c.locked_by != user:
+                    return Response({"error": f"Content is locked by {c.locked_by.full_name}."}, status=423)
+
+                # ── Collect all writers + reviewers, excluding the author ──────
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                internal_members = User.objects.filter(
+                    role__in=["writer", "reviewer"],
+                    is_active=True,
+                ).exclude(user_id=user.user_id)
+                notify_ids = [str(m.user_id) for m in internal_members]
+
+                # ── Transition to in_review (preview) ────────────────────────
+                c.status               = "in_review"
+                c.locked_by            = None
+                c.locked_at            = None
+                c.internal_approval    = False
+                c.marketing_approval   = False
+                c.stakeholder_approval = False
+                c.all_approved_at      = None
+                c.save()
+
+                # ── Fire notification emails via Celery ───────────────────────
+                from content.tasks import send_approval_email_task
+                send_approval_email_task.delay(
+                    user_ids   = notify_ids,
+                    content_id = str(c.content_id),
+                    stage      = "in_review",
+                )
+
+                ContentHistory.objects.create(
+                    content=c, action_type="submitted", performed_by=user,
+                    note="Submitted for internal review.",
+                )
+                return Response({
+                    "content_id":        str(c.content_id),
+                    "status":            c.status,
+                    "notified_count":    len(notify_ids),
+                    "message":           "Content submitted for internal review. All internal members have been notified.",
+                })
+
+        except Content.DoesNotExist:
+            return Response({"error": "Content not found."}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+
+
+
+
+
+# @extend_schema(
+#     tags=["Content"],
+#     request=inline_serializer(
+#         name="SaveContentRequest",
+#         fields={
+#             "title":           drf_serializers.CharField(),
+#             "body":            drf_serializers.CharField(),
+#             "content_id":      drf_serializers.UUIDField(required=False),
+#             "task_id":         drf_serializers.UUIDField(
+#                                    required=False,
+#                                    help_text="Required when creating the very first save (ties content to an existing task)."),
+#             "image":           drf_serializers.ImageField(required=False),
+#             "submit":          drf_serializers.BooleanField(required=False, default=False,
+#                                    help_text="True = submit for review (writer → internal approvers)"),
+#             "notify_user_ids": drf_serializers.ListField(
+#                                    child=drf_serializers.UUIDField(), required=False,
+#                                    help_text="Internal member IDs to notify (required when submit=true)"),
+#         }
+#     )
+# )
+# class SaveContentView(APIView):
+#     """
+#     POST /api/content/contents/save/
+
+#     A — No content_id: FIRST save.
+#         Requires `task_id` (the writer must have created a task via
+#         POST /api/content/contents/create-task/ first).
+#         Creates a fresh draft, auto-acquires lock.
+#     B — content_id, submit=false: saves draft (lock required).
+#     C — content_id, submit=true: submits for internal review.
+#          • status → 'in_review'
+#          • Notifies the specified internal members (notify_user_ids).
+#     """
+#     permission_classes = [HasRBACPermission]
+#     required_area  = "content"
+#     required_roles = ["write", "update"]
+#     parser_classes = (MultiPartParser, FormParser, JSONParser)
+
+#     def post(self, request):
+#         title = request.data.get("title", "").strip()
+#         body = request.data.get("body", "").strip()
+#         content_id = request.data.get("content_id")
+#         task_id= request.data.get("task_id")
+#         submit = request.data.get("submit", False)
+#         notify_ids = request.data.get("notify_user_ids", [])
+#         image_file = request.FILES.get("image")
+
+#         if not title:
+#             return Response({"error": "title is required."}, status=400)
+#         if not body:
+#             return Response({"error": "body is required."}, status=400)
+#         if submit and not notify_ids:
+#             return Response({"error": "notify_user_ids (internal members) required when submit=true."}, status=400)
+
+#         try:
+#             with transaction.atomic():
+#                 user = request.user
+
+#                 # ── A: New content ────────────────────────────────────────────
+#                 if not content_id:
+#                     # task_id is MANDATORY for first save — the frontend popup
+#                     # must call POST /api/content/contents/create-task/ first.
+#                     if not task_id:
+#                         return Response(
+#                             {
+#                                 "error": "task_id is required to create new content.",
+#                                 "action": "show_task_creation_popup",
+#                                 "message": "Please create a task first before saving content.",
+#                             },
+#                             status=400,
+#                         )
+#                     from board.models import Task
+#                     try:
+#                         task = Task.objects.get(pk=task_id)
+#                     except Task.DoesNotExist:
+#                         return Response({"error": "Task not found."}, status=404)
+
+#                     c = Content.objects.create(
+#                         title = title,
+#                         body = body,
+#                         author = user,
+#                         status = "draft",
+#                         locked_by = user,
+#                         locked_at = timezone.now(),
+#                         task_id = task,
+#                         campaign = task.campaign,
+#                         event = task.event,
+#                     )
+#                     if image_file:
+#                         c.image = image_file
+#                     c._version_data = {
+#                         "title":       title,
+#                         "body":        body,
+#                         "image_url":   c.image.url if c.image else None,
+#                         "changed_by_id": str(user.user_id),
+#                     }
+#                     c.save()
+#                     ContentHistory.objects.create(
+#                         content=c, action_type="draft_saved", performed_by=user
+#                     )
+#                     return Response({
+#                         "content_id": str(c.content_id),
+#                         "task_id":    str(task.pk),
+#                         "campaign_id": str(task.campaign_id),
+#                         "message":    "Draft created. Lock auto-acquired.",
+#                         "status":     c.status,
+#                     }, status=201)
+
+#                 # ── B / C: Existing content ───────────────────────────────────
+#                 c = Content.objects.select_for_update().get(content_id=content_id)
+
+#                 # Reject edits on permanently locked content
+#                 if c.locked_permanently:
+#                     return Response(
+#                         {"error": "Content is permanently locked due to rejection."},
+#                         status=423,
+#                     )
+
+#                 # Reject edits after the 24-hour post-approval window
+#                 if (
+#                     c.internal_approval and c.marketing_approval and c.stakeholder_approval
+#                     and c.all_approved_at is not None
+#                 ):
+#                     elapsed = (timezone.now() - c.all_approved_at).total_seconds()
+#                     if elapsed >= 86400:
+#                         return Response(
+#                             {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
+#                             status=423,
+#                         )
+
+#                 is_author = (c.author == user)
+#                 is_reviewer = (user.role == "reviewer")
+#                 is_assigned_sme = (
+#                     user.role == "sme" and
+#                     ContentAssignment.objects.filter(content=c, sme=user).exists()
+#                 )
+#                 if not (is_author or is_reviewer or is_assigned_sme):
+#                     return Response({"error": "Access denied."}, status=403)
+
+#                 if c.locked_by is None:
+#                     return Response({"error": "Acquire the lock first."}, status=423)
+#                 if c.locked_by != user:
+#                     return Response({"error": f"Locked by {c.locked_by.full_name}."}, status=423)
+
+#                 c.title = title
+#                 c.body  = body
+#                 if image_file:
+#                     c.image = image_file
+
+#                 c._version_data = {
+#                     "title":       title,
+#                     "body":        body,
+#                     "image_url":   c.image.url if c.image else None,
+#                     "changed_by_id": str(user.user_id),
+#                 }
+
+#                 if submit:
+#                     # Submit → in_review, notify specified internal members
+#                     c.status    = "in_review"
+#                     c.locked_by = None
+#                     c.locked_at = None
+#                     # Reset any prior approval flags
+#                     c.internal_approval    = False
+#                     c.marketing_approval   = False
+#                     c.stakeholder_approval = False
+#                     c.all_approved_at      = None
+#                     c.save()
+
+#                     from content.tasks import send_approval_email_task
+#                     send_approval_email_task.delay(
+#                         user_ids   = [str(uid) for uid in notify_ids],
+#                         content_id = str(c.content_id),
+#                         stage      = "in_review",
+#                     )
+#                     ContentHistory.objects.create(
+#                         content=c, action_type="submitted", performed_by=user,
+#                         note="Submitted for internal review.",
+#                     )
+#                     return Response({
+#                         "content_id": str(c.content_id),
+#                         "status":     c.status,
+#                         "message":    "Submitted for internal review. Notified internal members.",
+#                     })
+#                 else:
+#                     c.save()
+#                     ContentHistory.objects.create(
+#                         content=c, action_type="draft_saved", performed_by=user
+#                     )
+#                     return Response({
+#                         "content_id": str(c.content_id),
+#                         "status":     c.status,
+#                         "message":    "Draft saved.",
+#                     })
+
+#         except Content.DoesNotExist:
+#             return Response({"error": "Content not found."}, status=404)
+#         except Exception as e:
+#             return Response({"error": str(e)}, status=500)
 
 
 
@@ -924,66 +1175,70 @@ class OnlyReviewerListView(APIView):
 
 @extend_schema(tags=["Content"])
 class AssignSMEndExeView(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area = "content"
-    required_roles = ["admin", "promote"]
+  permission_classes = [HasRBACPermission]
+  required_area = "content"
+  required_roles = ["admin", "promote"]
 
-    def post(self, request, content_id):
-        sme_id = request.data.get("sme_id")
-        executive_id = request.data.get("executive_id")
+  def post(self, request, content_id):
+    sme_id = request.data.get("sme_id")
+    executive_id = request.data.get("executive_id")
 
-        if not sme_id or not executive_id:
-            return Response(
-                {"error": "sme_id and executive_id are required."},
-                status=400
+    if not executive_id:
+        return Response(
+            {"error": "executive_id is required."},
+            status=400
+        )
+
+    try:
+        with transaction.atomic():
+            content = Content.objects.select_for_update().get(content_id=content_id)
+
+            # ✅ Validate Executive (required)
+            try:
+                executive = User.objects.get(user_id=executive_id, role="exec_approver")
+            except User.DoesNotExist:
+                return Response({"error": "Executive not found"}, status=404)
+
+            # ✅ Validate SME (optional)
+            sme = None
+            if sme_id:
+                try:
+                    sme = User.objects.get(user_id=sme_id, role="sme")
+                except User.DoesNotExist:
+                    return Response({"error": "SME not found"}, status=404)
+
+            # ✅ Create assignment
+            assignment, created = ContentAssignment.objects.get_or_create(
+                content=content,
+                sme=sme,
+                executive=executive,
+                defaults={
+                    "assigned_by": request.user,
+                }
             )
 
-        try:
-            with transaction.atomic():
-                # Lock content row
-                content = Content.objects.select_for_update().get(content_id=content_id)
-
-                # Validate SME
-                sme = User.objects.get(user_id=sme_id, role="sme")
-
-                # Validate Executive
-                executive = User.objects.get(user_id=executive_id, role="exe_aprover")
-
-                # Create assignment
-                assignment, created = ContentAssignment.objects.get_or_create(
-                    content=content,
-                    sme=sme,
-                    executive=executive,
-                    defaults={
-                        "assigned_by": request.user,
-                    }
+            if not created:
+                return Response(
+                    {"error": "Assignment already exists."},
+                    status=400
                 )
 
-                if not created:
-                    return Response(
-                        {"error": "This SME is already assigned to this content under this executive."},
-                        status=400
-                    )
+            # ✅ Async task
+            from content.tasks import send_sme_assignment_email_task
+            send_sme_assignment_email_task.delay(str(content.content_id))
 
-                # Trigger async task
-                from content.tasks import send_sme_assignment_email_task
-                send_sme_assignment_email_task.delay(str(content.content_id))
+            return Response({
+                "message": f"{'No SME' if not sme else sme.full_name} assigned under {executive.full_name}."
+            })
 
-                return Response({
-                    "message": f"{sme.full_name} assigned under {executive.full_name}."
-                })
+    except Content.DoesNotExist:
+        return Response({"error": "Content not found."}, status=404)
 
-        except Content.DoesNotExist:
-            return Response({"error": "Content not found."}, status=404)
-
-        except User.DoesNotExist:
-            return Response({"error": "Invalid SME or Executive."}, status=404)
-
-        except Exception as e:
-            return Response(
-                {"error": "Something went wrong.", "details": str(e)},
-                status=500
-            )
+    except Exception as e:
+        return Response(
+            {"error": "Something went wrong.", "details": str(e)},
+            status=500
+        )
 
 
 ###in this have to add, if any change is made then have to remove from the auto scheduling

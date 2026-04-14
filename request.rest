@@ -221,8 +221,8 @@ Content-Type: application/json
 ### ============================================================
 
 ### Acquire lock (must hold lock to edit)
-POST {{contentUrl}}/contents/{{contentId}}/lock/
-Authorization: {{writerToken}}
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/lock/
+Authorization: Bearer {{adminToken}}
 
 ###
 
@@ -377,7 +377,7 @@ Authorization: {{internalToken}}
 ### ============================================================
 
 ### G1. Get content detail (includes approval flags, locked_permanently, can_publish_now)
-GET {{contentUrl}}/contents/fcb7e68f-87df-489e-9744-9b171f739d4b/
+GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/
 Authorization:Bearer {{adminToken}}
 
 ###
@@ -515,8 +515,8 @@ Authorization: {{adminToken}}
 ### ============================================================
 
 ### K1. Get version history
-GET {{contentUrl}}/contents/{{contentId}}/history/
-Authorization: {{adminToken}}
+GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/history/
+Authorization:Bearer {{adminToken}}
 
 ###
 
@@ -577,7 +577,7 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-"title": "AI Marketing Strategy from new content",
+"title": "AI Marketing Strategy from new content 2",
 "brief": "Create a detailed blog on how AI is transforming digital marketing in 2026.",
 "content_type": "blog",
 "campaign_id": "70d98ae1-25fc-4fe6-b519-ac5469f44eda",
@@ -610,13 +610,13 @@ Content-Type: application/json
 ### ============================================================
 
 ### M1. Assign SME to content
-POST {{contentUrl}}/contents/{{contentId}}/assign-sme/
-Authorization: {{adminToken}}
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/assign-sme/
+Authorization:Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-  "sme_id": "{{smeId}}",
-  "executive_id": "{{executive_id}}"
+  "sme_id": "38a3b6a2-6dc4-4b3a-aaab-0a89ef2fc9fe",
+  "executive_id": "a407660f-324d-4a3b-93cf-68880d6d2f80"
 }
 
 ###
@@ -625,6 +625,42 @@ Content-Type: application/json
 GET {{contentUrl}}/contents/particularForm/6850d311-4ff0-4e1d-9ae4-283751a39198
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
+
+
+
+
+
+
+
+## ===================================
+SAVING AND SUBMITTING Content-Length
+### ===============================
+
+
+POST {{contentUrl}}/contents/save/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "content_id": "90bd801a-c75e-413f-b33a-6219898d6ddf",
+  "title": "save 2",
+  "body": "Test body 2"
+}
+
+
+###
+
+
+POST {{contentUrl}}/contents/submit/
+Authorization: Bearer YOUR_ACCESS_TOKEN
+Content-Type: application/json
+
+{
+  "content_id": "123e4567-e89b-12d3-a456-426614174000"
+}
+
+
+
 
 ### ============================================================
 ### NOTIFY CANDIDATES
@@ -779,7 +815,9 @@ Content-Type: application/json
 # ============================================================
 # BOARD — FILTER & SEARCH
 # ============================================================
-
+###
+GET {{base}}/board/tasks/
+Authorization: Bearer {{adminToken}}
 ### Search by title keyword
 GET {{base}}/board/tasks/filter/?search=campaign
 Authorization: Bearer {{writerToken}}

@@ -9,7 +9,8 @@ from .views import (
 
     # Workflow
     NewContentButton,
-    SaveContentView, InitiateContentView,
+    SaveContentView, SubmitContentView,
+    InitiateContentView,
     ReviewerListView, NotifyCandidatesView,
     AssignSMEndExeView, ApproveContent,
 
@@ -80,6 +81,7 @@ urlpatterns = [
     #   submit=true  → submit for internal review (status → in_review)
     path("contents/save/", SaveContentView.as_view(), name="content-save"),
        path("contents/new/", NewContentButton.as_view(), name="new-content-button"),
+       path("contents/submitt/", SubmitContentView.as_view(), name="submit-content-button"),
     # ── Detail + Lock ─────────────────────────────────────────────────────────
     path("contents/<uuid:content_id>/",      ContentDetailView.as_view(), name="content-detail"),
     path("contents/<uuid:content_id>/lock/", ContentLock.as_view(),       name="content-lock"),
