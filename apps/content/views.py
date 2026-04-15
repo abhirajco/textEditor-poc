@@ -37,7 +37,7 @@ from drf_spectacular.utils import (
 from rest_framework import serializers as drf_serializers
 
 from .models import Content, ContentAssignment, ContentComment, ContentVersion, CommentMention, ContentHistory, ContentInitiationForm
-from .serializers import ContentSerializer, ContentInitiationFormSerializer
+from .serializers import ContentSerializer, ContentInitiationFormSerializer, ContentHistorySerializer
 from accounts.models import User
 from utils.notifications.services import handle_mentions_and_notifications
 from utils.permissions.base import HasRBACPermission
@@ -1337,6 +1337,40 @@ class AssignSMEndExeView(APIView):
             status=500
         )
 
+
+
+
+
+
+class ContentHistory2APIView(APIView):
+    """
+    Get full history of a specific content
+    """
+
+    def get(self, request, content_id):
+     try:
+        try:
+            content = Content.objects.get(content_id=content_id)
+        except Content.DoesNotExist:
+            return Response(
+                {"error": "Content not found"},
+                status=404
+            )
+
+        history = ContentHistory.objects.filter(content=content).select_related("performed_by")
+
+        serializer = ContentHistorySerializer(history, many=True)
+
+        return Response(
+            {
+                "content_id": str(content.content_id),
+                "content_title": content.title,
+                "history": serializer.data,
+            },
+            status=200
+        )
+     except Exception as e:
+         return Response({"error": str(e)})
 
 ###in this have to add, if any change is made then have to remove from the auto scheduling
 # ─────────────────────────────────────────────────────────────────────────────

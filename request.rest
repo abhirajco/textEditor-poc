@@ -672,6 +672,13 @@ GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/assignments/
 Authorization: Bearer {{adminToken}}
 
 
+###
+
+
+GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/history2/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
 
 ###############################################
 ### 1. INTERNAL APPROVAL (Step 1)

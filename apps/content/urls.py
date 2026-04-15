@@ -32,7 +32,9 @@ from .views import (
     FormListView, StartFromForm, ParticularFormView,
 
 
-    ContentAssignmentDetailView
+    ContentAssignmentDetailView,
+
+    ContentHistory2APIView
 )
 
 urlpatterns = [
@@ -123,4 +125,6 @@ urlpatterns = [
          ResolveComment.as_view(), name="comment-resolve"),
     path("comments/edit/<uuid:comment_id>/",
          CommentEditDelete.as_view(), name="comment-edit"),
+
+    path("contents/<uuid:content_id>/history2/", ContentHistory2APIView.as_view(), name="content-history"),
 ]

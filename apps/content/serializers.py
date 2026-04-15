@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Content, ContentVersion, ContentAssignment, ContentComment, ContentInitiationForm
+from .models import Content, ContentVersion, ContentAssignment, ContentComment, ContentInitiationForm, ContentHistory
+
 
 
 class ContentSerializer(serializers.ModelSerializer):
@@ -99,7 +100,24 @@ class ContentInitiationFormSerializer(serializers.ModelSerializer):
         ]
 
 
+class ContentHistorySerializer(serializers.ModelSerializer):
+    performed_by_name = serializers.SerializerMethodField()
 
+    class Meta:
+        model = ContentHistory
+        fields = [
+            "history_id",
+            "action_type",
+            "performed_by",
+            "performed_by_name",
+            "note",
+            "timestamp",
+        ]
+
+    def get_performed_by_name(self, obj):
+        if obj.performed_by:
+            return obj.performed_by.full_name
+        return "System"
 
 # from rest_framework import serializers
 # from .models import Content, ContentVersion, ContentAssignment, ContentComment
