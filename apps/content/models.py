@@ -164,7 +164,8 @@ class ContentAssignment(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.sme.full_name} → {self.content.title}"
+        sme_name = self.sme.full_name if self.sme else "No SME"
+        return f"{sme_name} → {self.content.title}"
 
 
 # ---------------------------------------------------------------------------

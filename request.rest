@@ -174,30 +174,30 @@ Authorization: Bearer {{writerToken}}
 
 ### A1. Create new draft content (no content_id → new draft)
 # @name createDraft
-POST {{contentUrl}}/contents/save/
-Authorization: Bearer {{writerToken}}
-Content-Type: application/json
+# POST {{contentUrl}}/contents/save/
+# Authorization: Bearer {{writerToken}}
+# Content-Type: application/json
 
-{
-  "campaign_id": "fcb7e68f-87df-489e-9744-9b171f739d4b",
-  "title": "My First Blog Post",
-  "body": "This is the body of the content piece.",
-  "submit": false
-}
+# {
+#   "campaign_id": "fcb7e68f-87df-489e-9744-9b171f739d4b",
+#   "title": "My First Blog Post",
+#   "body": "This is the body of the content piece.",
+#   "submit": false
+# }
 
-###
+# ###
 
-### A2. Save/update existing draft (lock required first → see Lock section)
-POST {{contentUrl}}/contents/save/
-Authorization: {{writerToken}}
-Content-Type: application/json
+# ### A2. Save/update existing draft (lock required first → see Lock section)
+# POST {{contentUrl}}/contents/save/
+# Authorization: {{writerToken}}
+# Content-Type: application/json
 
-{
-  "content_id": "{{contentId}}",
-  "title": "My First Blog Post — Updated",
-  "body": "Updated body with more details.",
-  "submit": false
-}
+# {
+#   "content_id": "{{contentId}}",
+#   "title": "My First Blog Post — Updated",
+#   "body": "Updated body with more details.",
+#   "submit": false
+# }
 
 ###
 
@@ -383,41 +383,41 @@ Authorization:Bearer {{adminToken}}
 ###
 
 ### G2. Get all active (non-published) content
-GET {{contentUrl}}/contents/active/
-Authorization:Bearer {{adminToken}}
+# GET {{contentUrl}}/contents/active/
+# Authorization:Bearer {{adminToken}}
 
-###
+# ###
 
-### G3. Get all published content
-GET {{contentUrl}}/contents/published/
-Authorization: Bearer {{adminToken}}
+# ### G3. Get all published content
+# GET {{contentUrl}}/contents/published/
+# Authorization: Bearer {{adminToken}}
 
 
 ### ============================================================
 ### STAGE-BASED LIST VIEWS (new — 4 stages)
 ### ============================================================
 
-### H1. Get all DRAFT content
-GET {{contentUrl}}/contents/stage/draft/
-Authorization:Bearer {{adminToken}}
+# ### H1. Get all DRAFT content
+# GET {{contentUrl}}/contents/stage/draft/
+# Authorization:Bearer {{adminToken}}
 
 ###
 
 ### H2. Get all IN_REVIEW content
-GET {{contentUrl}}/contents/stage/in_review/
-Authorization:Bearer {{adminToken}}
+# GET {{contentUrl}}/contents/stage/in_review/
+# Authorization:Bearer {{adminToken}}
 
-###
+# ###
 
-### H3. Get all REJECTED content
-GET {{contentUrl}}/contents/stage/rejected/
-Authorization:Bearer {{adminToken}}
+# ### H3. Get all REJECTED content
+# GET {{contentUrl}}/contents/stage/rejected/
+# Authorization:Bearer {{adminToken}}
 
-###
+# ###
 
-### H4. Get all PUBLISHED content
-GET {{contentUrl}}/contents/stage/published/
-Authorization:Bearer {{adminToken}}
+# ### H4. Get all PUBLISHED content
+# GET {{contentUrl}}/contents/stage/published/
+# Authorization:Bearer {{adminToken}}
 
 ###
 
@@ -666,7 +666,166 @@ Content-Type: application/json
 
 
 
+###
+### Get SME + Executive assignments for a content
+GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/assignments/
+Authorization: Bearer {{adminToken}}
 
+
+
+###############################################
+### 1. INTERNAL APPROVAL (Step 1)
+###############################################
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/approve/
+Authorization: Bearer {{reviewerToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 2. EXECUTIVE APPROVAL (Step 2 - stakeholder)
+###############################################
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/approve/
+Authorization: Bearer {{execToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 3. ADMIN APPROVAL (Step 2 - marketing)
+###############################################
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 4. REJECT CONTENT (any role with permission)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "reject",
+  "reason": "Content quality is not sufficient."
+}
+
+###############################################
+### 5. REJECT WITHOUT REASON (ERROR CASE)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "reject"
+}
+
+###############################################
+### 6. PUBLISH CONTENT (ADMIN ONLY)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "publish"
+}
+
+###############################################
+### 7. PUBLISH WITHOUT ALL APPROVALS (ERROR)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "publish"
+}
+
+###############################################
+### 8. INVALID ACTION (ERROR)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "invalid_action"
+}
+
+###############################################
+### 9. APPROVE WHEN NOT IN REVIEW (ERROR)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{internalToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 10. EXECUTIVE APPROVES AGAIN (DUPLICATE)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{executiveToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 11. ADMIN APPROVES AGAIN (DUPLICATE)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 12. INTERNAL APPROVES AGAIN (DUPLICATE)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{internalToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 13. UNAUTHORIZED USER (NO TOKEN)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 14. INVALID CONTENT ID
+###############################################
+POST {{baseUrl}}/contents/INVALID_ID/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
 ### ============================================================
 ### NOTIFY CANDIDATES
 ### ============================================================

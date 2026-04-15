@@ -29,7 +29,10 @@ from .views import (
     #list of role
     SMEListView , ExeListView , WriterListView , OnlyReviewerListView,
 
-    FormListView, StartFromForm, ParticularFormView
+    FormListView, StartFromForm, ParticularFormView,
+
+
+    ContentAssignmentDetailView
 )
 
 urlpatterns = [
@@ -92,6 +95,12 @@ urlpatterns = [
 
     # ── Workflow ──────────────────────────────────────────────────────────────
     path("contents/<uuid:content_id>/assign-sme/", AssignSMEndExeView.as_view(), name="assign-sme"),
+
+    path(
+        "contents/<uuid:content_id>/assignments/",
+        ContentAssignmentDetailView.as_view(),
+        name="content-assignments"
+    ),
 
     # POST /api/content/contents/<id>/approve/
     #   body: { "action": "approve" | "reject" | "publish", "reason": "..." }
