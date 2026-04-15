@@ -14,6 +14,8 @@ from .views import (
     ReviewerListView, NotifyCandidatesView,
     AssignSMEndExeView, ApproveContent,
 
+    RejectContentView,PublishContentView,
+
     # Versions
     ContentVersionHistory, ContentVersionDetailView, LatestVersionView,
 
@@ -107,6 +109,8 @@ urlpatterns = [
     # POST /api/content/contents/<id>/approve/
     #   body: { "action": "approve" | "reject" | "publish", "reason": "..." }
     path("contents/<uuid:content_id>/approve/", ApproveContent.as_view(), name="content-approve"),
+    path("contents/<uuid:content_id>/reject/", RejectContentView.as_view(), name="content-reject"),
+    path("contents/<uuid:content_id>/publish/", PublishContentView.as_view(), name="content-publish"),
 
     # ── Versions ──────────────────────────────────────────────────────────────
     path("contents/<uuid:content_id>/history/",

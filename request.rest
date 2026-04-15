@@ -221,7 +221,7 @@ Content-Type: application/json
 ### ============================================================
 
 ### Acquire lock (must hold lock to edit)
-POST {{contentUrl}}/contents/a7ef9b39-025f-48d7-b160-7a05dfa36847/lock/
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/lock/
 Authorization: Bearer {{adminToken}}
 
 ###
@@ -334,8 +334,8 @@ Content-Type: application/json
 ### ============================================================
 
 ### F1. Add a comment (reverts content to draft, resets all approval flags)
-POST {{contentUrl}}/contents/{{contentId}}/comment/
-Authorization: {{internalToken}}
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/comment/
+Authorization:Bearer {{reviewerToken}}
 Content-Type: application/json
 
 {
@@ -380,6 +380,8 @@ Authorization: {{internalToken}}
 GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/
 Authorization:Bearer {{adminToken}}
 
+#90bd801a-c75e-413f-b33a-6219898d6ddf
+#231985d6-eb45-42d1-b2f7-d1ed4d4bc30e
 ###
 
 ### G2. Get all active (non-published) content
@@ -468,6 +470,10 @@ GET {{contentUrl}}/contents/filter/?content_type=blog
 Authorization:Bearer {{adminToken}}
 
 ###
+GET {{contentUrl}}/contents/filter/
+Authorization:Bearer {{adminToken}}
+###
+
 
 GET {{contentUrl}}/contents/filter/?status=draft
 Authorization:Bearer {{adminToken}}
@@ -661,7 +667,7 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-  "content_id": "a7ef9b39-025f-48d7-b160-7a05dfa36847"
+  "content_id": "90bd801a-c75e-413f-b33a-6219898d6ddf"
 }
 
 
@@ -675,7 +681,7 @@ Authorization: Bearer {{adminToken}}
 ###
 
 
-GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/history2/
+GET {{contentUrl}}/contents/231985d6-eb45-42d1-b2f7-d1ed4d4bc30e/history2/
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
@@ -713,33 +719,43 @@ Content-Type: application/json
   "action": "approve"
 }
 
-###############################################
-### 4. REJECT CONTENT (any role with permission)
-###############################################
-POST {{baseUrl}}/contents/{{contentId}}/approve/
+
+###
+POST {{contentUrl}}/contents/231985d6-eb45-42d1-b2f7-d1ed4d4bc30e/reject/
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
   "action": "reject",
-  "reason": "Content quality is not sufficient."
+  "reason": "didnt like it"
 }
+###############################################
+### 4. REJECT CONTENT (any role with permission)
+###############################################
+# POST {{baseUrl}}/contents/{{contentId}}/approve/
+# Authorization: Bearer {{adminToken}}
+# Content-Type: application/json
+
+# {
+#   "action": "reject",
+#   "reason": "Content quality is not sufficient."
+# }
 
 ###############################################
 ### 5. REJECT WITHOUT REASON (ERROR CASE)
 ###############################################
-POST {{baseUrl}}/contents/{{contentId}}/approve/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
+# POST {{baseUrl}}/contents/{{contentId}}/approve/
+# Authorization: Bearer {{adminToken}}
+# Content-Type: application/json
 
-{
-  "action": "reject"
-}
+# {
+#   "action": "reject"
+# }
 
 ###############################################
 ### 6. PUBLISH CONTENT (ADMIN ONLY)
 ###############################################
-POST {{baseUrl}}/contents/{{contentId}}/approve/
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/publish/
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
