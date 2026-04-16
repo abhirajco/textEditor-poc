@@ -34,7 +34,7 @@ def _bust_task_cache():
 class CampaignListView(APIView):
     """GET all campaigns / POST create campaign."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
@@ -69,7 +69,7 @@ class CampaignListView(APIView):
 class CampaignDetailView(APIView):
     """GET / PATCH / DELETE a single campaign."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def _get(self, campaign_id):
@@ -112,7 +112,7 @@ class CampaignDetailView(APIView):
 class CampaignEventsView(APIView):
     """GET all events under a campaign."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, campaign_id):
@@ -129,7 +129,7 @@ class CampaignEventsView(APIView):
 class CampaignTasksView(APIView):
     """GET all root tasks (no parent_task) directly under a campaign."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, campaign_id):
@@ -193,7 +193,7 @@ class EventListView(APIView):
 class EventDetailView(APIView):
     """GET / PATCH / DELETE a single event."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def _get(self, event_id):
@@ -235,7 +235,7 @@ class EventDetailView(APIView):
 class EventTasksView(APIView):
     """GET all tasks under a specific event."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, event_id):
@@ -280,7 +280,7 @@ class EventTasksView(APIView):
 class TaskListView(APIView):
     """GET all tasks (cached) / POST create task."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
@@ -383,7 +383,7 @@ class TaskListView(APIView):
 class TaskDetailView(APIView):
     """GET full task detail / DELETE task."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     #for queery optimisation
@@ -417,7 +417,7 @@ class TaskDetailView(APIView):
 class TaskSubtasksView(APIView):
     """GET all subtasks of a task."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, task_id):
@@ -440,7 +440,7 @@ class TaskSubtasksView(APIView):
 class TaskUpdateView(APIView):
     """PATCH task metadata."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["write", "update", "admin"]
 
     def patch(self, request, task_id):
@@ -495,7 +495,7 @@ class TaskUpdateView(APIView):
 class TransferTaskView(APIView):
     """POST transfer task to another user."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["write", "update", "admin"]
 
     def post(self, request, task_id):
@@ -561,7 +561,7 @@ class TransferTaskView(APIView):
 class TaskFilterSearchView(APIView):
     """Filterable task list with campaign/event/hierarchy filters."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
@@ -630,7 +630,7 @@ class TaskFilterSearchView(APIView):
 @extend_schema(tags=["Board"])
 class MyTasksView(APIView):
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
@@ -643,7 +643,7 @@ class MyTasksView(APIView):
 @extend_schema(tags=["Board"])
 class TasksByUserView(APIView):
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, user_id):
@@ -665,7 +665,7 @@ class TasksByUserView(APIView):
 @extend_schema(tags=["Board"])
 class DiscussionView(APIView):
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request, task_id):
@@ -693,7 +693,7 @@ class DiscussionView(APIView):
 @extend_schema(tags=["Board"])
 class DiscussionDeleteView(APIView):
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "board"
+    required_area  = "content"
     required_roles = ["write", "update", "admin"]
 
     def delete(self, request, task_id, comment_id):

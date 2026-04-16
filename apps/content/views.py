@@ -233,8 +233,8 @@ class SaveContentView(APIView):
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request):
-        title      = request.data.get("title", "").strip()
-        body       = request.data.get("body", "").strip()
+        title = request.data.get("title", "").strip()
+        body = request.data.get("body", "").strip()
         content_id = request.data.get("content_id")
         image_file = request.FILES.get("image")
 
@@ -293,9 +293,9 @@ class SaveContentView(APIView):
                     c.image = image_file
 
                 c._version_data = {
-                    "title":         title,
-                    "body":          body,
-                    "image_url":     c.image.url if c.image else None,
+                    "title": title,
+                    "body": body,
+                    "image_url": c.image.url if c.image else None,
                     "changed_by_id": str(user.user_id),
                 }
                 c.save()
@@ -1305,7 +1305,14 @@ class ApproveContent(APIView):
                         return Response({"message": "Already approved by executive"})
 
                     c.stakeholder_approval = True
-                    c.save(update_fields=["stakeholder_approval"])
+
+
+                    triple = c.check_and_mark_all_approved()
+
+                    if triple:
+                        c.status= "approved"
+
+                    c.save(update_fields=["stakeholder_approval" , "status"])
 
                     ContentHistory.objects.create(
                         content=c,
@@ -1313,7 +1320,6 @@ class ApproveContent(APIView):
                         performed_by=user
                     )
 
-                    triple = c.check_and_mark_all_approved()
 
                     return Response({
                         "message": "Executive approval recorded",
@@ -1322,17 +1328,23 @@ class ApproveContent(APIView):
 
                 # ADMIN APPROVAL
                 elif group in self.ADMIN_GROUPS:
-                    if not c.internal_approval:
-                        return Response(
-                            {"error": "Internal approval required first"},
-                            status=400
-                        )
+                    # if not c.internal_approval:
+                    #     return Response(
+                    #         {"error": "Internal approval required first"},
+                    #         status=400
+                    #     )
 
                     if c.marketing_approval:
                         return Response({"message": "Already approved by admin"})
 
                     c.marketing_approval = True
-                    c.save(update_fields=["marketing_approval"])
+
+                    triple = c.check_and_mark_all_approved()
+
+                    if triple:
+                        c.status= "approved"
+
+                    c.save(update_fields=["marketing_approval" , "status"])
 
                     ContentHistory.objects.create(
                         content=c,
@@ -1340,7 +1352,7 @@ class ApproveContent(APIView):
                         performed_by=user
                     )
 
-                    triple = c.check_and_mark_all_approved()
+                    
 
                     return Response({
                         "message": "Admin approval recorded",
@@ -1423,9 +1435,6 @@ class RejectContentView(APIView):
 
 
 
-
-
-
 @extend_schema(tags=["Content"])
 class PublishContentView(APIView):
     permission_classes = [HasRBACPermission]
@@ -1473,6 +1482,10 @@ class PublishContentView(APIView):
 
         except Content.DoesNotExist:
             return Response({"error": "Content not found"}, status=404)
+
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 9–11. VERSION HISTORY
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1595,7 +1608,7 @@ class WriteComment(APIView):
     required_roles = ["feedback", "admin"]
 
     def post(self, request, content_id):
-        text     = request.data.get("comment_text", "").strip()
+        text = request.data.get("comment_text", "").strip()
         reply_to = request.data.get("reply_to", None)
         if not text:
             return Response({"error": "comment_text is required."}, status=400)

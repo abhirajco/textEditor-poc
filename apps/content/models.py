@@ -85,7 +85,7 @@ class Content(models.Model):
     # Timestamp when all 3 approvals were collected → triggers 24h auto-publish
     all_approved_at = models.DateTimeField(
         null=True, blank=True,
-        help_text="Set when all three approvals are collected. Auto-publish fires 24h later.",
+        help_text="Set when all three approvals are collected.",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
