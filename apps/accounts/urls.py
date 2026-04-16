@@ -17,8 +17,8 @@ urlpatterns = [
     # ── Admin — User Management ────────────────────────────────────────────
     path('users/all/', ViewAllUsers.as_view(),        name='all_users'),
     path('users/pending/', PeopleWithoutRole.as_view(),   name='pending_users'),
-    path('users/assign/<int:user_id>/', AssignRole.as_view(),          name='assign_role'),
-    path('users/delete/<int:user_id>/', DeleteUser.as_view(),          name='delete_user'),
+    path('users/assign/<uuid:user_id>/', AssignRole.as_view(),          name='assign_role'),
+    path('users/delete/<uuid:user_id>/', DeleteUser.as_view(),          name='delete_user'),
     path('users/rbac-audit/', AdminUserRBACListView.as_view(), name='rbac_audit'),
 
     # ── @Mention Search ────────────────────────────────────────────────────

@@ -146,6 +146,16 @@ Content-Type: application/json
   "refresh": "PASTE_REFRESH_TOKEN_HERE"
 }
 
+###
+POST {{base}}/accounts/users/assign/5e8ce970-acf9-4198-9892-677c879835e2/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+ 
+{
+  "group": "executive",
+  "role":  "exec_approver"
+}
+
 
 ### ============================================================
 ### DROPDOWNS (for form population)
