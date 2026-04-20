@@ -39,14 +39,14 @@ def send_approval_email_task(self, user_ids, content_id, stage):
     try:
         from content.models import Content
         from accounts.models import User
-        c          = Content.objects.get(content_id=content_id)
+        c  = Content.objects.get(content_id=content_id)
         users      = User.objects.filter(user_id__in=user_ids)
         email_list = [u.email for u in users if u.is_active]
         if not email_list:
             return
         stage_labels = {
-            "in_review":              "is now In Review and awaits internal approval",
-            "pending_exec_admin":     "has been approved internally and awaits your review",
+            "in_review": "is now In Review and awaits internal approval",
+            "pending_exec_admin": "has been approved internally and awaits your review",
         }
         description = stage_labels.get(stage, f"has moved to '{stage}'")
         send_mail(

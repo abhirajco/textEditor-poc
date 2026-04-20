@@ -44,6 +44,38 @@ from utils.permissions.base import HasRBACPermission
 from django.utils import timezone
 
 
+
+LOCK_WINDOW_SECONDS =  120
+
+
+def is_content_locked(content):
+    """
+    Returns True if content is locked after 24 hours of full approval.
+    """
+
+    if (
+        content.internal_approval
+        and content.marketing_approval
+        and content.stakeholder_approval
+        and content.all_approved_at is not None
+    ):
+        elapsed = timezone.now() - content.all_approved_at
+        return elapsed.total_seconds() >= LOCK_WINDOW_SECONDS
+
+    return False
+
+
+def get_content_lock_error():
+    """
+    Standard error response for locked content.
+    """
+    return {
+        "error": "Content is locked: the 24-hour edit window after full approval has expired."
+    }
+
+
+
+
 def _notify_exec_admin_and_assignees(content):
     """
     Send notifications to:
@@ -87,7 +119,7 @@ def _notify_exec_admin_and_assignees(content):
         send_approval_email_task.delay(
             list(all_ids),
             str(content.content_id),
-            "pending_exec_admin_sme"
+            "pending_exec_admin"
         )
 
 
@@ -154,17 +186,20 @@ class ContentLock(APIView):
                     )
 
                 # 24-hour post-approval edit lock
-                if (
-                    c.internal_approval and c.marketing_approval and c.stakeholder_approval
-                    and c.all_approved_at is not None
-                ):
-                    #from django.utils import timezone
-                    elapsed = timezone.now() - c.all_approved_at
-                    if elapsed.total_seconds() >= 86400:
-                        return Response(
-                            {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
-                            status=423,
-                        )
+                # if (
+                #     c.internal_approval and c.marketing_approval and c.stakeholder_approval
+                #     and c.all_approved_at is not None
+                # ):
+                #     #from django.utils import timezone
+                #     elapsed = timezone.now() - c.all_approved_at
+                #     if elapsed.total_seconds() >= 86400:
+                #         return Response(
+                #             {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
+                #             status=423,
+                #         )
+
+                if is_content_locked(c):
+                    return Response(get_content_lock_error(), status=423)
 
                 if request.user.role == "sme":
                     if not ContentAssignment.objects.filter(content=c, sme=request.user).exists():
@@ -258,16 +293,19 @@ class SaveContentView(APIView):
                     )
 
                 # ── Guard: 24-hour post-full-approval window expired ───────────
-                if (
-                    c.internal_approval and c.marketing_approval and c.stakeholder_approval
-                    and c.all_approved_at is not None
-                ):
-                    elapsed = (timezone.now() - c.all_approved_at).total_seconds()
-                    if elapsed >= 86400:
-                        return Response(
-                            {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
-                            status=423,
-                        )
+                # if (
+                #     c.internal_approval and c.marketing_approval and c.stakeholder_approval
+                #     and c.all_approved_at is not None
+                # ):
+                #     elapsed = (timezone.now() - c.all_approved_at).total_seconds()
+                #     if elapsed >= 86400:
+                #         return Response(
+                #             {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
+                #             status=423,
+                #         )
+
+                if is_content_locked(c):
+                    return Response(get_content_lock_error(), status=423)
 
                 # ── Guard: only draft content can be saved ────────────────────
                 # if c.status != "draft":
@@ -373,16 +411,20 @@ class SubmitContentView(APIView):
                     )
 
                 # ── Guard: 24-hour post-full-approval window ──────────────────
-                if (
-                    c.internal_approval and c.marketing_approval and c.stakeholder_approval
-                    and c.all_approved_at is not None
-                ):
-                    elapsed = (timezone.now() - c.all_approved_at).total_seconds()
-                    if elapsed >= 86400:
-                        return Response(
-                            {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
-                            status=423,
-                        )
+                # if (
+                #     c.internal_approval and c.marketing_approval and c.stakeholder_approval
+                #     and c.all_approved_at is not None
+                # ):
+                #     elapsed = (timezone.now() - c.all_approved_at).total_seconds()
+                #     if elapsed >= 86400:
+                #         return Response(
+                #             {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
+                #             status=423,
+                #         )
+
+
+                if is_content_locked(c):
+                    return Response(get_content_lock_error(), status=423)
 
                 # ── Guard: only draft content can be submitted ────────────────
                 if c.status != "draft":
@@ -629,7 +671,7 @@ class FormListView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["read"]  # adjust if needed
+    required_roles = ["read" , "write"]  # adjust if needed
 
     def get(self, request):
         try:
@@ -669,7 +711,7 @@ class ParticularFormView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["read"]  # adjust if needed
+    required_roles = ["read" , "write"]  # adjust if needed
 
     def get(self, request , form_id):
         try:
@@ -1623,20 +1665,24 @@ class WriteComment(APIView):
                     )
 
                 # Enforce 24-hour post-approval lock
-                fully_approved = (
-                    c.internal_approval
-                    and c.marketing_approval
-                    and c.stakeholder_approval
-                    and c.all_approved_at is not None
-                )
-                if fully_approved:
-                    from django.utils import timezone
-                    elapsed = timezone.now() - c.all_approved_at
-                    if elapsed.total_seconds() >= 86400:
-                        return Response(
-                            {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
-                            status=423,
-                        )
+                # fully_approved = (
+                #     c.internal_approval
+                #     and c.marketing_approval
+                #     and c.stakeholder_approval
+                #     and c.all_approved_at is not None
+                # )
+                # if fully_approved:
+                #     from django.utils import timezone
+                #     elapsed = timezone.now() - c.all_approved_at
+                #     if elapsed.total_seconds() >= 86400:
+                #         return Response(
+                #             {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
+                #             status=423,
+                #         )
+
+                if is_content_locked(c):
+                    return Response(get_content_lock_error(), status=423)
+
 
                 # Validate reply_to if provided
                 parent_comment = None

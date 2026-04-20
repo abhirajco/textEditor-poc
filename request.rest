@@ -162,14 +162,14 @@ Content-Type: application/json
 ### ============================================================
 
 ### Get active campaigns
-GET {{contentUrl}}/campaigns/active/
-Authorization: Bearer  {{writerToken}}
+# GET {{contentUrl}}/campaigns/active/
+# Authorization: Bearer  {{writerToken}}
 
 ###
 
 ### Get events for a campaign
-GET {{contentUrl}}/events/?campaign_id=fcb7e68f-87df-489e-9744-9b171f739d4b
-Authorization: Bearer  {{writerToken}}
+# GET {{contentUrl}}/events/?campaign_id=fcb7e68f-87df-489e-9744-9b171f739d4b
+# Authorization: Bearer  {{writerToken}}
 
 ###
 
@@ -909,10 +909,35 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 ###
+GET {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+PATCH {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "AMS"
+}
+
+###
 GET {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/events
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
+
+
+
+###
+PATCH {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/events
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "AMS"
+}
 
 # "campaign_id": "70d98ae1-25fc-4fe6-b519-ac5469f44eda",
 

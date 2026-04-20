@@ -14,7 +14,12 @@ from .serializers import (
     CampaignSerializer, EventSerializer,
     TaskSerializer, TaskListSerializer, DiscussionSerializer,
 )
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
+from drf_spectacular.utils import (extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer, OpenApiResponse,extend_schema,
+    extend_schema_view,
+    OpenApiParameter,
+    OpenApiExample,
+    OpenApiResponse
+    )
 from rest_framework import serializers as drf_serializers
 from django.core.serializers.json import DjangoJSONEncoder
 
@@ -65,7 +70,137 @@ class CampaignListView(APIView):
         return Response(CampaignSerializer(campaign).data, status=201)
 
 
-@extend_schema(tags=["Campaign"])
+@extend_schema_view(
+    get=extend_schema(
+        summary="Get campaign details",
+        parameters=[
+            OpenApiParameter(
+                name="campaign_id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="Unique campaign ID"
+            )
+        ],
+        responses={
+            200: CampaignSerializer,
+            404: OpenApiResponse(
+                response={"type": "object", "properties": {
+                    "error": {"type": "string"}
+                }},
+                description="Campaign not found",
+                examples=[
+                    OpenApiExample(
+                        "Not Found",
+                        value={"error": "Campaign not found."}
+                    )
+                ]
+            )
+        }
+    ),
+
+    patch=extend_schema(
+        summary="Update campaign (partial)",
+        parameters=[
+            OpenApiParameter(
+                name="campaign_id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="Unique campaign ID"
+            )
+        ],
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "start_date": {"type": "string", "format": "date"},
+                    "end_date": {"type": "string", "format": "date"},
+                    "max_hierarchy_level": {"type": "integer"}
+                },
+                "example": {
+                    "title": "Updated Campaign",
+                    "description": "New description",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-12-31",
+                    "max_hierarchy_level": 3
+                }
+            }
+        },
+        responses={
+            200: CampaignSerializer,
+            403: OpenApiResponse(
+                response={"type": "object", "properties": {
+                    "error": {"type": "string"}
+                }},
+                examples=[
+                    OpenApiExample(
+                        "Forbidden",
+                        value={"error": "Only creator or admin can edit."}
+                    )
+                ]
+            ),
+            404: OpenApiResponse(
+                response={"type": "object", "properties": {
+                    "error": {"type": "string"}
+                }},
+                examples=[
+                    OpenApiExample(
+                        "Not Found",
+                        value={"error": "Campaign not found."}
+                    )
+                ]
+            )
+        }
+    ),
+
+    delete=extend_schema(
+        summary="Delete campaign",
+        parameters=[
+            OpenApiParameter(
+                name="campaign_id",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="Unique campaign ID"
+            )
+        ],
+        responses={
+            200: OpenApiResponse(
+                response={"type": "object", "properties": {
+                    "message": {"type": "string"}
+                }},
+                examples=[
+                    OpenApiExample(
+                        "Success",
+                        value={"message": "Campaign deleted."}
+                    )
+                ]
+            ),
+            403: OpenApiResponse(
+                response={"type": "object", "properties": {
+                    "error": {"type": "string"}
+                }},
+                examples=[
+                    OpenApiExample(
+                        "Forbidden",
+                        value={"error": "Only creator or admin can delete."}
+                    )
+                ]
+            ),
+            404: OpenApiResponse(
+                response={"type": "object", "properties": {
+                    "error": {"type": "string"}
+                }},
+                examples=[
+                    OpenApiExample(
+                        "Not Found",
+                        value={"error": "Campaign not found."}
+                    )
+                ]
+            )
+        }
+    )
+)
 class CampaignDetailView(APIView):
     """GET / PATCH / DELETE a single campaign."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
@@ -85,6 +220,8 @@ class CampaignDetailView(APIView):
         return Response(CampaignSerializer(c).data)
 
     def patch(self, request, campaign_id):
+     try: 
+        print("hii")
         c = self._get(campaign_id)
         if not c:
             return Response({"error": "Campaign not found."}, status=404)
@@ -96,8 +233,11 @@ class CampaignDetailView(APIView):
                 setattr(c, field, request.data[field])
         c.save()
         return Response(CampaignSerializer(c).data)
+     except Exception as e:
+           return Response({"error": str(e)})
 
     def delete(self, request, campaign_id):
+       try: 
         c = self._get(campaign_id)
         if not c:
             return Response({"error": "Campaign not found."}, status=404)
@@ -106,6 +246,8 @@ class CampaignDetailView(APIView):
         c.delete()
         _bust_task_cache()
         return Response({"message": "Campaign deleted."})
+       except Exception as e:
+           return Response({"error": str(e)})
 
 
 @extend_schema(tags=["Campaign"])
