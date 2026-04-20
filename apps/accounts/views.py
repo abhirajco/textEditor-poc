@@ -291,7 +291,7 @@ class AssignRole(APIView):
 
         elif group == 'executive':
             # Insight content access
-            for action in ['read', 'feedback', 'promote']:
+            for action in ['read', 'approve' , 'initiate']:
                 RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
             # Kanban board access
             for action in ['read', 'write', 'update']:
@@ -300,7 +300,7 @@ class AssignRole(APIView):
         elif group == 'internal':
             if role == 'writer':
                 # Insight
-                for action in ['write', 'update']:
+                for action in ['read' , 'write', 'update' , 'approve']:
                     RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
                 # Kanban
                 for action in ['read', 'write', 'update']:
@@ -308,7 +308,7 @@ class AssignRole(APIView):
 
             elif role == 'reviewer':
                 # Insight
-                for action in ['update', 'feedback', 'promote']:
+                for action in ['read' , 'update', 'approve']:
                     RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
                 # Kanban
                 for action in ['read', 'write', 'update']:
@@ -316,7 +316,7 @@ class AssignRole(APIView):
 
         elif group == 'external' and role == 'sme':
             # SMEs only get Insight content access — no board access
-            for action in ['update', 'feedback', 'promote']:
+            for action in ['read']:
                 RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
 
 

@@ -128,7 +128,7 @@ def _notify_exec_admin_and_assignees(content):
 class ContentDetailView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+    required_roles = ["read", "admin"]
 
     def get(self, request, content_id):
         try:
@@ -171,7 +171,7 @@ class ContentDetailView(APIView):
 class ContentLock(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "update"]
+    required_roles = ["write", "update" , "admin"]
 
     def post(self, request, content_id):
         with transaction.atomic():
@@ -264,7 +264,7 @@ class SaveContentView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "update"]
+    required_roles = ["write", "update" , "admin"]
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request):
@@ -390,7 +390,7 @@ class SubmitContentView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "update"]
+    required_roles = ["write", "update" , "admin"]
 
     def post(self, request):
         content_id = request.data.get("content_id")
@@ -507,7 +507,7 @@ class NewContentButton(APIView):
     """POST /api/content/contents/startFromForm/ — executive fills initiation form."""
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "initiate"]
+    required_roles = ["write" , "admin"]
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request):
@@ -609,7 +609,7 @@ class InitiateContentView(APIView):
     """POST /api/content/contents/initiate/ — executive fills initiation form."""
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "initiate"]
+    required_roles = ["initiate" , "admin"]
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request):
@@ -671,7 +671,7 @@ class FormListView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["read" , "write"]  # adjust if needed
+    required_roles = ["update", "admin"]  # writer reviwer and admin
 
     def get(self, request):
         try:
@@ -711,7 +711,7 @@ class ParticularFormView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["read" , "write"]  # adjust if needed
+    required_roles = ["update", "admin"]  # adjust if needed
 
     def get(self, request , form_id):
         try:
@@ -744,7 +744,7 @@ class StartFromForm(APIView):
     """POST /api/content/contents/startFromForm/ — executive fills initiation form."""
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "initiate"]
+    required_roles = ["write", "admin"] #only writer
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request):
@@ -832,7 +832,7 @@ class StartFromForm(APIView):
 class ReviewerListView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+    required_roles = ["read", "write", "admin"]
 
     def get(self, request):
         internal = User.objects.filter(group="internal", is_active=True)
@@ -850,7 +850,7 @@ class ReviewerListView(APIView):
 class NotifyCandidatesView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "admin"]
+    required_roles = ["write", "initiate" , "admin"]
 
     def post(self, request, content_id):
         notify_ids = request.data.get("notify_user_ids", [])
@@ -885,7 +885,7 @@ class NotifyCandidatesView(APIView):
 class SMEListView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+    required_roles = ["read", "write", "admin"]
 
     def get(self, request):
         smes = User.objects.filter(group="external", is_active=True)
@@ -899,7 +899,7 @@ class SMEListView(APIView):
 class ExeListView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+    required_roles = ["read", "write", "admin"]
 
     def get(self, request):
         smes = User.objects.filter(group="executive", is_active=True)
@@ -913,7 +913,7 @@ class ExeListView(APIView):
 class WriterListView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+    required_roles = ["read", "write", "admin"]
 
     def get(self, request):
         smes = User.objects.filter(role="writer", is_active=True)
@@ -927,7 +927,7 @@ class WriterListView(APIView):
 class OnlyReviewerListView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+    required_roles = ["read", "write", "admin"]
 
     def get(self, request):
         smes = User.objects.filter(role="reviewer", is_active=True)
@@ -941,7 +941,7 @@ class OnlyReviewerListView(APIView):
 class AssignSMEndExeView(APIView):
   permission_classes = [HasRBACPermission]
   required_area = "content"
-  required_roles = ["admin", "promote"]
+  required_roles = ["admin", "initiate" , "write"]
 
   def post(self, request, content_id):
     sme_id = request.data.get("sme_id")
@@ -1008,11 +1008,15 @@ class AssignSMEndExeView(APIView):
 
 
 
-
+#for timeline
 class ContentHistory2APIView(APIView):
     """
     Get full history of a specific content
     """
+
+    permission_classes = [HasRBACPermission]
+    required_area = "content"
+    required_roles = ["read"]
 
     def get(self, request, content_id):
      try:
@@ -1289,7 +1293,7 @@ class ApproveContent(APIView):
     
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["feedback", "admin", "promote"]
+    required_roles = ["approve" , "admin"]
 
     INTERNAL_GROUPS = {"internal"}
     EXECUTIVE_GROUPS = {"executive"}
@@ -1422,7 +1426,7 @@ class ApproveContent(APIView):
 class RejectContentView(APIView):
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["feedback", "admin", "promote"]
+    required_roles = ["approve" , "admin"]
 
     def post(self, request, content_id):
         reason = request.data.get("reason", "").strip()
@@ -1536,7 +1540,7 @@ class PublishContentView(APIView):
 class ContentVersionHistory(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "feedback", "admin", "promote"]
+    required_roles = ["read" , "update", "admin"]   #not sure for this, who all needs to see the version
 
     def get(self, request, content_id):
         try:
@@ -1570,7 +1574,7 @@ class ContentVersionHistory(APIView):
 class ContentVersionDetailView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "feedback", "admin"]
+    required_roles = ["read", "admin"]
 
     def get(self, request, content_id, version_id):
         try:
@@ -1595,7 +1599,7 @@ class ContentVersionDetailView(APIView):
 class LatestVersionView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "update", "feedback", "admin"]
+    required_roles = ["read", "write", "admin"]
 
     def get(self, request, content_id):
         try:
@@ -1647,11 +1651,12 @@ class WriteComment(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["feedback", "admin"]
+    required_roles = ["read", "admin"]
 
     def post(self, request, content_id):
         text = request.data.get("comment_text", "").strip()
         reply_to = request.data.get("reply_to", None)
+        selected_text = request.data.get("selected_text", None)
         if not text:
             return Response({"error": "comment_text is required."}, status=400)
         try:
@@ -1695,7 +1700,7 @@ class WriteComment(APIView):
                 latest  = ContentVersion.objects.filter(content=c).order_by("-created_at").first()
                 comment = ContentComment.objects.create(
                     content=c, user=request.user, comment_text=text,
-                    version=latest, reply_to=parent_comment,
+                    version=latest, reply_to=parent_comment, selected_text=selected_text,
                 )
                 cache.delete(f"content_comments_{content_id}")
 
@@ -1727,7 +1732,7 @@ class WriteComment(APIView):
 class ResolveComment(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["feedback", "admin"]
+    required_roles = ["updare", "admin"]
 
     def patch(self, request, comment_id):
         try:
@@ -1757,7 +1762,7 @@ class ResolveComment(APIView):
 class ContentCommentHistoryView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "feedback", "admin", "promote"]
+    required_roles = ["read", "admin"]
 
     def get(self, request, content_id):
         cache_key   = f"content_comments_{content_id}"
@@ -1783,6 +1788,7 @@ class ContentCommentHistoryView(APIView):
                 "group": cm.user.group,
                 "text": cm.comment_text,
                 "resolved": cm.resolved,
+                "selected_text": cm.selected_text if cm.selected_text else None,
                 "reply_to": str(cm.reply_to_id) if cm.reply_to_id else None,
                 "timestamp":cm.created_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "version_at_time": str(cm.detected_version_id) if cm.detected_version_id else "Initial Draft",
@@ -1802,7 +1808,7 @@ class ContentCommentHistoryView(APIView):
 class CommentEditDelete(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["feedback", "admin"]
+    required_roles = ["read", "admin"]
 
     def patch(self, request, comment_id):
         try:
@@ -1915,7 +1921,7 @@ class ContentStatsView(APIView):
 class ContentFilterView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "feedback", "admin"]
+    required_roles = ["read", "admin"]
 
     QUARTER_MONTHS = {1: (1, 3), 2: (4, 6), 3: (7, 9), 4: (10, 12)}
 
@@ -1993,7 +1999,7 @@ class ContentAssignmentDetailView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["read"]
+    required_roles = ["read" , "admin"]
 
     def get(self, request, content_id):
         try:

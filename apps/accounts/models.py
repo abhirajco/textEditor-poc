@@ -90,8 +90,8 @@ class RBAC(models.Model):
         ("update","Update"),
         ("delete",  "Delete"),
         ("admin", "Admin"),
-        ("feedback", "Feedback / Vote"),
-        ("promote", "Promote Status"),
+        ("approve" , "Approve"),
+        ("initiate" , "Initiate form")
     ]
 
     rbac_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False ,unique=True)

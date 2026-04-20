@@ -38,7 +38,7 @@ def handle_mentions_and_notifications(text: str, content_obj, comment_obj, sende
     from content.models import CommentMention
     User = get_user_model()
 
-    pattern = r"@\[([^\]]+)\]\((\d+)\)"
+    pattern = r"@\[([^\]]+)\]\(([0-9a-fA-F-]{36})\)"
     matches = re.findall(pattern, text)
 
     for full_name, user_id in matches:

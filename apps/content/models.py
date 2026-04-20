@@ -216,15 +216,16 @@ class ContentComment(models.Model):
     Adding a comment → content reverts to 'draft' (unless rejected/published).
     """
 
-    comment_id   = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    content      = models.ForeignKey(Content, on_delete=models.CASCADE, related_name="comments")
-    user         = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    version      = models.ForeignKey(
+    comment_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    content = models.ForeignKey(Content, on_delete=models.CASCADE, related_name="comments")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    version  = models.ForeignKey(
         "ContentVersion", on_delete=models.SET_NULL, null=True, blank=True
     )
     comment_text = models.TextField()
-    resolved     = models.BooleanField(default=False, db_index=True)
-    reply_to     = models.ForeignKey(
+    selected_text= models.TextField(null=True, blank=True)
+    resolved  = models.BooleanField(default=False, db_index=True)
+    reply_to  = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
         null=True, blank=True,

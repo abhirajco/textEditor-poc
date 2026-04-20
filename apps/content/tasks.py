@@ -144,23 +144,37 @@ def send_rejection_email_task(self, content_id, rejected_by_name, reason):
 
 # ── Mention email ─────────────────────────────────────────────────────────────
 
+import re
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
 def send_mention_email_task(self, mentioned_user_id, sender_name, content_title,
                              content_id, comment_text, comment_id):
     """Sends @mention email notification in background."""
     try:
         from accounts.models import User
+        from django.conf import settings
+        from django.core.mail import send_mail
+
         user = User.objects.get(user_id=mentioned_user_id)
+
+        # ✅ Convert @[Full Name](uuid) → @Full Name
+        cleaned_text = re.sub(
+            # r"@\[(.*?)\]\([^)]+\)",   # match @[Name](anything)
+            r"@\[(.*?)\]\(([0-9a-fA-F-]+)\)",
+            r"@\1",                  # replace with @Name
+            comment_text
+        )
+
         send_mail(
-            subject        = f"You were mentioned in '{content_title}'",
-            message        = f"Hello {user.full_name},\n\n{sender_name} mentioned you.\n\n{comment_text}",
-            from_email     = settings.EMAIL_HOST_USER,
+            subject= f"You were mentioned in '{content_title}'",
+            message   = f"Hello {user.full_name},\n\n{sender_name} mentioned you in a comment.\n\n{cleaned_text}",
+            from_email = settings.EMAIL_HOST_USER,
             recipient_list = [user.email],
             fail_silently  = False,
         )
+
     except Exception as exc:
         raise self.retry(exc=exc)
-
 
 # ── OTP email ─────────────────────────────────────────────────────────────────
 
