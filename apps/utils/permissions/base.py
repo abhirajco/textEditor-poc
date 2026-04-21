@@ -18,8 +18,8 @@ class HasRBACPermission(permissions.BasePermission):
             return False
 
         # Admin fast-pass — admins can do everything
-        if request.user.group == 'admin':
-            return True
+        # if request.user.group == 'admin':
+        #     return True
 
         area        = getattr(view, 'required_area',  None)
         single_role = getattr(view, 'required_role',  None)

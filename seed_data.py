@@ -1,10 +1,10 @@
 """
-Advanced seed data generator
+Advanced seed data generator v4
 Creates realistic workflow data for ALL APIs
 
 Users: admin, executive, writer, reviewer, sme
 Content stages: draft, in_review, rejected, published
-Campaign hierarchy included
+Campaign → Event → Task hierarchy included
 
 Passwords: Pass123!
 """
@@ -18,34 +18,76 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django.setup()
 
 from django.contrib.auth.models import Group
-from accounts.models import *
-from board.models import *
-from content.models import *
+from accounts.models import User, RBAC
+from board.models import Campaign, Event, Task, TaskHistory, Discussion
+from content.models import (
+    Content,
+    ContentVersion,
+    ContentHistory,
+    ContentAssignment,
+    ContentComment,
+)
 
 PASSWORD = "Pass123!"
 
 
 # ============================================================
-# USERS
+# USER DEFINITIONS
 # ============================================================
 
 USERS_DEF = [
-    {"email": "admin@platform.com", "name": "Admin", "group": "admin", "role": "admin", "staff": True},
-    {"email": "exec@platform.com", "name": "Executive", "group": "executive", "role": "exec_approver"},
-    {"email": "writer@platform.com", "name": "Writer", "group": "internal", "role": "writer"},
-    {"email": "reviewer@platform.com", "name": "Reviewer", "group": "internal", "role": "reviewer"},
-    {"email": "sme@platform.com", "name": "Subject Expert", "group": "external", "role": "sme"},
+    {
+        "email": "admin@platform.com",
+        "name": "Admin",
+        "group": "admin",
+        "role": "admin",
+        "staff": True,
+    },
+    {
+        "email": "exec@platform.com",
+        "name": "Executive",
+        "group": "executive",
+        "role": "exec_approver",
+        "staff": False,
+    },
+    {
+        "email": "writer@platform.com",
+        "name": "Writer",
+        "group": "internal",
+        "role": "writer",
+        "staff": False,
+    },
+    {
+        "email": "reviewer@platform.com",
+        "name": "Reviewer",
+        "group": "internal",
+        "role": "reviewer",
+        "staff": False,
+    },
+    {
+        "email": "sme@platform.com",
+        "name": "Subject Expert",
+        "group": "external",
+        "role": "sme",
+        "staff": False,
+    },
 ]
 
+# RBAC Rules mapped by group
 RBAC_RULES = {
-    "admin": {("content", "admin"), ("board", "admin")},
-    "executive": {("content", "read"), ("content", "promote")},
-    "internal": {("content", "write"), ("content", "update"), ("content", "feedback")},
-    "external": {("content", "feedback")},
+    "admin": {("content", "admin"), ("board", "admin"), ("reports", "admin"), ("settings", "admin"), ("users", "admin")},
+    "executive": {("content", "read"), ("content", "approve"), ("board", "read"), ("reports", "read")},
+    "internal": {("content", "write"), ("content", "update"), ("content", "approve"), ("board", "write"), ("board", "update"), ("reports", "read")},
+    "external": {("content", "update"), ("content", "approve")},
 }
 
 
+# ============================================================
+# USER SEEDING
+# ============================================================
+
 def seed_users():
+    """Create users with groups and RBAC rules"""
     users = {}
 
     for u in USERS_DEF:
@@ -56,79 +98,99 @@ def seed_users():
             role=u["role"],
             is_staff=u.get("staff", False),
             is_superuser=u.get("staff", False),
+            is_active=True,
         )
 
         user.set_password(PASSWORD)
         user.save()
 
-        g, _ = Group.objects.get_or_create(name=u["group"].capitalize())
-        user.groups.add(g)
+        # Create and assign group
+        group, _ = Group.objects.get_or_create(name=u["group"].capitalize())
+        user.groups.add(group)
 
-        RBAC.objects.filter(application_group=g).delete()
+        # Delete existing RBAC rules for this group
+        RBAC.objects.filter(application_group=group).delete()
 
-        for area, action in RBAC_RULES.get(u["group"], []):
+        # Create new RBAC rules
+        for area, action in RBAC_RULES.get(u["group"], set()):
             RBAC.objects.create(
-                application_group=g,
+                application_group=group,
                 application_area=area,
                 application_action=action,
             )
 
         users[u["role"]] = user
+        print(f"  ✓ Created user: {u['email']} ({u['role']})")
 
     return users
 
 
 # ============================================================
-# BOARD DATA
+# BOARD DATA SEEDING
 # ============================================================
 
 def seed_board(users):
+    """Create campaigns with events and tasks"""
     campaigns = []
+    admin = users["admin"]
+    writer = users["writer"]
+
     for i in range(3):
+        # Create Campaign
         camp = Campaign.objects.create(
-            title=f"Campaign {i+1}",
-            description="Marketing campaign",
-            created_by=users["admin"],
+            title=f"Campaign {i + 1}",
+            description=f"Marketing campaign {i + 1}",
+            created_by=admin,
             max_hierarchy_level=3,
         )
+        print(f"  ✓ Created campaign: {camp.title}")
 
         for j in range(2):
+            # Create Event under Campaign
             event = Event.objects.create(
                 campaign=camp,
-                title=f"Event {j+1} - {camp.title}",
-                created_by=users["admin"],
+                title=f"Event {j + 1} - {camp.title}",
+                created_by=admin,
             )
+            print(f"    ✓ Created event: {event.title}")
 
             for k in range(2):
-                # FIX 1: Use campaign/event instead of campaign_id/event_id 
-                # (Assuming you updated your models.py as discussed)
+                # FIX 1: Use campaign and event objects (not campaign_id/event_id)
                 task = Task.objects.create(
-                    campaign=camp, 
-                    event=event,
-                    title=f"Task {k+1} - {event.title}",
-                    assigned_by=users["admin"],
-                    assigned_to=users["writer"],
-                    status="todo", # Match your STATUS_CHOICES "todo" (no underscore)
+                    campaign=camp,  # Pass the campaign object
+                    event=event,    # Pass the event object
+                    title=f"Task {k + 1} - {event.title}",
+                    assigned_by=admin,
+                    assigned_to=writer,
+                    status="todo",  # Use "todo" (no underscore)
+                    priority="medium",
                 )
 
+                # Create task history
                 TaskHistory.objects.create(
                     task=task,
                     action="created",
-                    performed_by=users["admin"],
+                    performed_by=admin,
                     detail="Seed task created",
                 )
 
+                # Create initial discussion
                 Discussion.objects.create(
                     task=task,
-                    author=users["admin"],
+                    author=admin,
                     message="Initial task discussion",
                 )
+                print(f"      ✓ Created task: {task.title}")
+
         campaigns.append(camp)
+
     return campaigns
 
+
 # ============================================================
-# CONTENT GENERATION CONSTANTS (Make sure these are here!)
+# CONTENT CONSTANTS
 # ============================================================
+
 STAGES = ["draft", "in_review", "rejected", "published"]
 
 TITLES = [
@@ -138,41 +200,59 @@ TITLES = [
     "DevOps Best Practices",
     "SEO Strategy 2026",
     "Content Marketing Trends",
+    "Python for Data Science",
+    "Web Development Essentials",
 ]
 
+CONTENT_TYPES = ["blog", "whitepaper", "case_study", "guide"]
+
+TAGS = [
+    "seo,marketing,ai",
+    "cloud,security,devops",
+    "saas,technology,trends",
+    "content,strategy,digital",
+]
+
+
 def random_date():
+    """Generate a random date within the past year"""
     return datetime.now() - timedelta(days=random.randint(1, 365))
 
 
 # ============================================================
-# CONTENT GENERATION
+# CONTENT SEEDING
 # ============================================================
 
 def seed_content(users, campaigns):
+    """Create content items with versions, history, assignments, and comments"""
     writer = users["writer"]
     reviewer = users["reviewer"]
     admin = users["admin"]
-    executive = users["exec_approver"] # This maps to the "exec@platform.com" user
+    executive = users["exec_approver"]
     sme = users["sme"]
 
     all_tasks = list(Task.objects.all())
 
+    print("\n  Creating content items...")
+
     for i in range(40):
         stage = random.choice(STAGES)
-        task = random.choice(all_tasks)
+        task = random.choice(all_tasks) if all_tasks else None
 
         content = Content.objects.create(
-            title=random.choice(TITLES) + f" #{i}",
-            body="Sample generated content body",
+            title=random.choice(TITLES) + f" #{i + 1}",
+            body="Sample generated content body. This is a realistic content piece for testing.",
             author=writer,
-            campaign=task.campaign,
-            event=task.event,
-            task_id=task,
+            campaign=task.campaign if task else campaigns[0],
+            event=task.event if task else None,
+            task=task,  # FIX 1: Use 'task' object, not 'task_id'
             status=stage,
-            tags="seo,marketing,ai",
-            content_type="blog",
+            tags=random.choice(TAGS),
+            content_type=random.choice(CONTENT_TYPES),
+            created_at=random_date(),
         )
 
+        # Create content version
         ContentVersion.objects.create(
             content=content,
             title=content.title,
@@ -180,279 +260,188 @@ def seed_content(users, campaigns):
             changed_by=writer,
         )
 
+        # Create content history
         ContentHistory.objects.create(
             content=content,
             action_type="created",
             performed_by=writer,
         )
 
+        # Set approval flags for published content
         if stage == "published":
             content.internal_approval = True
             content.marketing_approval = True
             content.stakeholder_approval = True
             content.save()
 
+        # Lock permanently rejected content
         if stage == "rejected":
             content.locked_permanently = True
             content.save()
 
-        # SME assignment
-        if random.random() > 0.6:
-            # FIX 2: Added the missing 'executive' field to satisfy the NOT NULL constraint
+        # SME assignment (60% chance)
+        if random.random() > 0.4:
+            # FIX 2: Include 'executive' field for ContentAssignment
             ContentAssignment.objects.create(
                 content=content,
                 sme=sme,
-                executive=executive # Passing the executive user object here
+                executive=executive,  # Pass the executive user object
             )
 
-        # comments
+        # Add random comments (0-3 per content)
         for _ in range(random.randint(0, 3)):
+            # Generate random selected text (excerpt from content body)
+            selected_text = None
+            if random.random() > 0.5:  # 50% chance to have selected text
+                words = content.body.split()
+                if len(words) > 2:
+                    start_idx = random.randint(0, len(words) - 3)
+                    selected_text = " ".join(words[start_idx:start_idx + 3])
+            
             comment = ContentComment.objects.create(
                 content=content,
                 user=random.choice([reviewer, admin, executive]),
-                comment_text="Please review this section.",
+                comment_text="Please review this section carefully.",
+                selected_text=selected_text,  # NEW FIELD
             )
 
-            # FIX 3: Ensure this matches your CommentMention model field (user vs mentioned_user)
-            CommentMention.objects.create(
-                comment=comment,
-                content=content,
-                user=writer, 
-            )
+        if (i + 1) % 10 == 0:
+            print(f"    ✓ Created {i + 1}/40 content items")
 
-    print("Created 40 content items")
+    print(f"  ✓ Created 40 content items total")
+
+
 # ============================================================
-# MAIN
+# CLEANUP/WIPE
 # ============================================================
 
 def wipe():
+    """Delete all seeded data in correct order (respecting foreign keys)"""
+    print("\nWiping database...")
 
-    ContentComment.objects.all().delete()
-    CommentMention.objects.all().delete()
-    ContentAssignment.objects.all().delete()
-    ContentVersion.objects.all().delete()
-    ContentHistory.objects.all().delete()
-    Content.objects.all().delete()
+    try:
+        # Content related (delete in reverse order of dependencies)
+        ContentComment.objects.all().delete()
+        print("  ✓ Deleted ContentComment records")
+    except Exception as e:
+        print(f"  ⚠ ContentComment table issue: {e}")
 
-    Discussion.objects.all().delete()
-    TaskHistory.objects.all().delete()
-    Task.objects.all().delete()
-    Event.objects.all().delete()
-    Campaign.objects.all().delete()
+    try:
+        ContentAssignment.objects.all().delete()
+        print("  ✓ Deleted ContentAssignment records")
+    except Exception as e:
+        print(f"  ⚠ ContentAssignment table issue: {e}")
 
-    RBAC.objects.all().delete()
-    User.objects.all().delete()
-    Group.objects.all().delete()
+    try:
+        ContentHistory.objects.all().delete()
+        print("  ✓ Deleted ContentHistory records")
+    except Exception as e:
+        print(f"  ⚠ ContentHistory table issue: {e}")
 
+    try:
+        ContentVersion.objects.all().delete()
+        print("  ✓ Deleted ContentVersion records")
+    except Exception as e:
+        print(f"  ⚠ ContentVersion table issue: {e}")
+
+    try:
+        Content.objects.all().delete()
+        print("  ✓ Deleted Content records")
+    except Exception as e:
+        print(f"  ⚠ Content table issue: {e}")
+
+    try:
+        # Board related
+        Discussion.objects.all().delete()
+        print("  ✓ Deleted Discussion records")
+    except Exception as e:
+        print(f"  ⚠ Discussion table issue: {e}")
+
+    try:
+        TaskHistory.objects.all().delete()
+        print("  ✓ Deleted TaskHistory records")
+    except Exception as e:
+        print(f"  ⚠ TaskHistory table issue: {e}")
+
+    try:
+        Task.objects.all().delete()
+        print("  ✓ Deleted Task records")
+    except Exception as e:
+        print(f"  ⚠ Task table issue: {e}")
+
+    try:
+        Event.objects.all().delete()
+        print("  ✓ Deleted Event records")
+    except Exception as e:
+        print(f"  ⚠ Event table issue: {e}")
+
+    try:
+        Campaign.objects.all().delete()
+        print("  ✓ Deleted Campaign records")
+    except Exception as e:
+        print(f"  ⚠ Campaign table issue: {e}")
+
+    try:
+        # Users and auth
+        RBAC.objects.all().delete()
+        print("  ✓ Deleted RBAC records")
+    except Exception as e:
+        print(f"  ⚠ RBAC table issue: {e}")
+
+    try:
+        User.objects.all().delete()
+        print("  ✓ Deleted User records")
+    except Exception as e:
+        print(f"  ⚠ User table issue: {e}")
+
+    try:
+        Group.objects.all().delete()
+        print("  ✓ Deleted Group records")
+    except Exception as e:
+        print(f"  ⚠ Group table issue: {e}")
+
+    print("  ✓ Database cleanup complete")
+
+
+# ============================================================
+# MAIN EXECUTION
+# ============================================================
 
 def main():
+    print("\n" + "=" * 60)
+    print("SEED DATA GENERATOR v4")
+    print("=" * 60)
 
-    print("Wiping DB...")
+    print("\n1. Wiping database...")
     wipe()
 
-    print("Seeding users...")
+    print("\n2. Seeding users...")
     users = seed_users()
 
-    print("Seeding board...")
+    print("\n3. Seeding board (campaigns → events → tasks)...")
     campaigns = seed_board(users)
 
-    print("Generating content...")
+    print("\n4. Generating content...")
     seed_content(users, campaigns)
 
-    print("\nSeed Complete\n")
+    print("\n" + "=" * 60)
+    print("SEED COMPLETE ✓")
+    print("=" * 60)
 
-    print("Login credentials (Pass123!)")
-    print("admin@platform.com")
-    print("exec@platform.com")
-    print("writer@platform.com")
-    print("reviewer@platform.com")
-    print("sme@platform.com")
+    print("\nLogin Credentials (Password: Pass123!)")
+    print("-" * 60)
+    for user_def in USERS_DEF:
+        print(f"  {user_def['email']:25} ({user_def['role']})")
+    print("-" * 60)
+    print("\nTotal Data Created:")
+    print(f"  • Users: {len(USERS_DEF)}")
+    print(f"  • Campaigns: {Campaign.objects.count()}")
+    print(f"  • Events: {Event.objects.count()}")
+    print(f"  • Tasks: {Task.objects.count()}")
+    print(f"  • Content Items: {Content.objects.count()}")
+    print(f"  • Content Comments: {ContentComment.objects.count()}")
+    print("=" * 60 + "\n")
 
 
 if __name__ == "__main__":
     main()
-
-
-
-# """
-# Fresh seed data for v4 — Article renamed to Content, Campaign/Event/Task hierarchy.
-# All passwords: Pass123!
-# """
-# import os
-# import django
-# os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
-# django.setup()
-
-# from django.contrib.auth.models import Group
-# from accounts.models import User, RBAC
-# from content.models import Content, ContentVersion, ContentComment, ContentAssignment, CommentMention
-# from board.models import Campaign, Event, Task, TaskHistory, Discussion
-
-# PASSWORD = "Pass123!"
-
-# USERS_DEF = [
-#     {"email": "admin@platform.com",    "name": "System Admin",   "group": "admin",     "role": "admin",         "staff": True},
-#     {"email": "exec@platform.com",     "name": "Exec Boss",      "group": "executive", "role": "exec_approver", "staff": False},
-#     {"email": "writer@platform.com",   "name": "Alice Writer",   "group": "internal",  "role": "writer",        "staff": False},
-#     {"email": "reviewer@platform.com", "name": "Bob Reviewer",   "group": "internal",  "role": "reviewer",      "staff": False},
-#     {"email": "sme@platform.com",      "name": "Charlie Expert", "group": "external",  "role": "sme",           "staff": False},
-# ]
-
-# RBAC_MAP = {
-#     "admin":    {("content","admin"),("board","admin"),("users","admin")},
-#     "executive":{("content","read"),("content","feedback"),("content","promote"),
-#                  ("board","read"),("board","write"),("board","update")},
-#     "internal": {("content","write"),("content","update"),("content","feedback"),
-#                  ("content","promote"),("board","read"),("board","write"),("board","update")},
-#     "external": {("content","update"),("content","feedback"),("content","promote")},
-# }
-
-# def wipe():
-#     print("Wiping data...")
-#     Discussion.objects.all().delete()
-#     TaskHistory.objects.all().delete()
-#     Task.objects.all().delete()
-#     Event.objects.all().delete()
-#     Campaign.objects.all().delete()
-#     ContentComment.objects.all().delete()
-#     ContentAssignment.objects.all().delete()
-#     ContentVersion.objects.all().delete()
-#     Content.objects.all().delete()
-#     RBAC.objects.all().delete()
-#     User.objects.all().delete()
-#     Group.objects.all().delete()
-#     print("Done.")
-
-# def seed_users():
-#     users = {}
-#     for d in USERS_DEF:
-#         user = User.objects.create(
-#             email=d["email"], full_name=d["name"],
-#             group=d["group"], role=d["role"],
-#             is_staff=d["staff"], is_superuser=d["staff"], is_active=True,
-#         )
-#         user.set_password(PASSWORD)
-#         user.save()
-
-#         dg, _ = Group.objects.get_or_create(name=d["group"].capitalize())
-#         user.groups.add(dg)
-
-#         RBAC.objects.filter(application_group=dg).delete()
-#         for area, action in RBAC_MAP.get(d["group"], set()):
-#             RBAC.objects.get_or_create(application_group=dg, application_area=area, application_action=action)
-
-#         print(f"  Created {d['email']} ({d['role']})")
-#         users[d["role"]] = user
-
-#     users["admin"] = User.objects.get(email="admin@platform.com")
-#     return users
-
-# def seed_content(users):
-#     admin, writer, reviewer = users["admin"], users["writer"], users["reviewer"]
-#     sme, exec_u = users["sme"], users["exec_approver"]
-
-#     contents = []
-#     for title, status, lock in [
-#         ("Introduction to Cloud Computing", "draft", False),
-#         ("Python Best Practices", "pending_reviewer", False),
-#         ("Security Fundamentals", "pending_executive", False),
-#         ("Docker Deep Dive", "published", False),
-#     ]:
-#         c = Content.objects.create(title=title, body=f"Body of {title}.", author=writer, status=status)
-#         if lock:
-#             c.locked_by = writer
-#             c.save()
-#         ContentVersion.objects.create(content=c, title=title, body=c.body, changed_by=writer)
-#         print(f"  Content [{status}] {title}")
-#         contents.append(c)
-
-#     return contents
-
-# def seed_board(users):
-#     admin, writer, reviewer = users["admin"], users["writer"], users["reviewer"]
-#     exec_u = users["exec_approver"]
-
-#     # Campaign 1 — max 2 levels (root + 1 subtask level)
-#     camp1 = Campaign.objects.create(
-#         title="Q2 Marketing Campaign", description="All Q2 marketing activities.",
-#         created_by=admin, max_hierarchy_level=2,
-#     )
-#     print(f"  Campaign: {camp1.title} (max_level={camp1.max_hierarchy_level})")
-
-#     # Campaign 2 — max 3 levels
-#     camp2 = Campaign.objects.create(
-#         title="Product Launch 2026", description="Product launch campaign.",
-#         created_by=admin, max_hierarchy_level=3,
-#     )
-#     print(f"  Campaign: {camp2.title} (max_level={camp2.max_hierarchy_level})")
-
-#     # Events under campaign 1
-#     ev1 = Event.objects.create(campaign=camp1, title="Social Media Week", created_by=admin)
-#     ev2 = Event.objects.create(campaign=camp1, title="Email Campaign Sprint", created_by=admin)
-#     print(f"  Events: {ev1.title}, {ev2.title}")
-
-#     # Root task under campaign 1, event 1
-#     t1 = Task.objects.create(
-#         campaign=camp1, event=ev1, title="Design social media assets",
-#         priority="high", status="in_progress",
-#         assigned_by=admin, assigned_to=writer,
-#     )
-#     TaskHistory.objects.create(task=t1, action="created", performed_by=admin, detail="Created")
-#     print(f"  Task (depth=1): {t1.title}")
-
-#     # Subtask of t1 (depth=2, allowed since max=2)
-#     t1a = Task.objects.create(
-#         campaign=camp1, event=ev1, parent_task=t1,
-#         title="Design Instagram stories",
-#         priority="medium", status="to_do",
-#         assigned_by=admin, assigned_to=writer,
-#     )
-#     TaskHistory.objects.create(task=t1a, action="created", performed_by=admin, detail="Subtask created")
-#     print(f"  Subtask (depth=2): {t1a.title}")
-
-#     # Root task directly under campaign (no event)
-#     t2 = Task.objects.create(
-#         campaign=camp1, title="Campaign strategy document",
-#         priority="high", status="to_do",
-#         assigned_by=admin, assigned_to=reviewer,
-#     )
-#     TaskHistory.objects.create(task=t2, action="created", performed_by=admin, detail="Created")
-#     print(f"  Task under campaign directly (no event): {t2.title}")
-
-#     # Campaign 2 — 3-level hierarchy
-#     ev3 = Event.objects.create(campaign=camp2, title="Launch Event", created_by=admin)
-#     t3 = Task.objects.create(
-#         campaign=camp2, event=ev3, title="Prepare launch materials",
-#         priority="high", status="to_do", assigned_by=admin, assigned_to=writer,
-#     )
-#     t3a = Task.objects.create(
-#         campaign=camp2, event=ev3, parent_task=t3,
-#         title="Write product description", priority="medium", status="to_do",
-#         assigned_by=admin, assigned_to=writer,
-#     )
-#     t3a1 = Task.objects.create(
-#         campaign=camp2, event=ev3, parent_task=t3a,
-#         title="Draft v1", priority="low", status="to_do",
-#         assigned_by=admin, assigned_to=writer,
-#     )
-#     print(f"  3-level subtasks: {t3.title} → {t3a.title} → {t3a1.title}")
-
-#     # Discussion on t1
-#     Discussion.objects.create(task=t1, author=admin, message="Please follow brand guidelines.")
-#     Discussion.objects.create(task=t1, author=writer, message="Will have first draft ready by Friday.")
-
-# def main():
-#     wipe()
-#     users = seed_users()
-#     seed_content(users)
-#     seed_board(users)
-#     print("\n=== SEED COMPLETE ===")
-#     print("Credentials (all: Pass123!)")
-#     print("  admin@platform.com    — admin")
-#     print("  exec@platform.com     — exec_approver")
-#     print("  writer@platform.com   — writer")
-#     print("  reviewer@platform.com — reviewer")
-#     print("  sme@platform.com      — sme")
-
-# if __name__ == "__main__":
-#     main()

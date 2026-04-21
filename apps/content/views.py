@@ -74,8 +74,6 @@ def get_content_lock_error():
     }
 
 
-
-
 def _notify_exec_admin_and_assignees(content):
     """
     Send notifications to:
@@ -390,7 +388,7 @@ class SubmitContentView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["write", "update" , "admin"]
+    required_roles = ["write", "admin"]
 
     def post(self, request):
         content_id = request.data.get("content_id")
@@ -1006,8 +1004,6 @@ class AssignSMEndExeView(APIView):
 
 
 
-
-
 #for timeline
 class ContentHistory2APIView(APIView):
     """
@@ -1043,242 +1039,6 @@ class ContentHistory2APIView(APIView):
      except Exception as e:
          return Response({"error": str(e)})
 
-###in this have to add, if any change is made then have to remove from the auto scheduling
-# ─────────────────────────────────────────────────────────────────────────────
-# 8. APPROVE / REJECT / PUBLISH
-# ─────────────────────────────────────────────────────────────────────────────
-
-# @extend_schema(
-#     tags=["Content"],
-#     request=inline_serializer(
-#         name="ApproveContentRequest",
-#         fields={
-#             "action": drf_serializers.ChoiceField(
-#                 choices=["approve", "reject", "publish"],
-#                 help_text=(
-#                     "approve — cast your approval vote\n"
-#                     "reject  — reject and permanently lock content\n"
-#                     "publish — admin-only: publish immediately once all 3 approvals are in"
-#                 ),
-#             ),
-#             "reason": drf_serializers.CharField(
-#                 required=False, allow_blank=True,
-#                 help_text="Reason for rejection (required when action=reject)",
-#             ),
-#         }
-#     )
-# )
-# class ApproveContent(APIView):
-#     """
-#     POST /api/content/contents/<content_id>/approve/
-
-#     APPROVAL FLOW:
-#     ─────────────────────────────────────────────────────────────
-#     Step 1 — Internal member approves (action=approve, group=internal):
-#       • Sets internal_approval=True
-#       • Notifies ALL executives and ALL admins
-
-#     Step 2 — Executive approves (action=approve, group=executive):
-#       • Sets stakeholder_approval=True
-#       • Checks if all 3 are done → stamps all_approved_at + schedules auto-publish
-
-#     Step 2 — Admin approves (action=approve, group=admin):
-#       • Sets marketing_approval=True
-#       • Checks if all 3 are done → stamps all_approved_at + schedules auto-publish
-
-#     Reject (action=reject) — any of the 3 approvers:
-#       • Sets status=rejected, locked_permanently=True
-#       • Notifies author
-
-#     Publish now (action=publish, group=admin only):
-#       • Admin manually publishes when all 3 flags are True
-#     ─────────────────────────────────────────────────────────────
-#     """
-#     permission_classes = [HasRBACPermission]
-#     required_area  = "content"
-#     required_roles = ["feedback", "admin", "promote"]
-
-#     INTERNAL_GROUPS  = {"internal"}
-#     EXECUTIVE_GROUPS = {"executive"}
-#     ADMIN_GROUPS     = {"admin"}
-
-#     def post(self, request, content_id):
-#       try:
-
-#         action = request.data.get("action", "").strip()
-#         reason = request.data.get("reason", "").strip()
-#         user   = request.user
-#         group  = getattr(user, "group", "")
-
-#         if action not in ("approve", "reject", "publish"):
-#             return Response({"error": "action must be one of: approve, reject, publish"}, status=400)
-
-#         try:
-#             with transaction.atomic():
-#                 c = Content.objects.select_for_update().get(content_id=content_id)
-#                 # ── REJECT ────────────────────────────────────────────────────
-#                 if action == "reject":
-#                     # if group not in (self.INTERNAL_GROUPS | self.EXECUTIVE_GROUPS | self.ADMIN_GROUPS):
-#                     #     return Response({"error": "You do not have permission to reject."}, status=403)
-#                     if c.status not in ("in_review", "approved" , "draft"):
-#                         return Response(
-#                             {"error": f"Cannot reject content in '{c.status}' status."},
-#                             status=400,
-#                         )
-#                     if not reason:
-#                         return Response({"error": "reason is required when rejecting."}, status=400)
-
-#                     c.status = "rejected"
-#                     c.locked_permanently  = True
-#                     c.locked_by = user
-#                     c.locked_at = None
-#                     c.internal_approval    = False
-#                     c.marketing_approval   = False
-#                     c.stakeholder_approval = False
-#                     c.all_approved_at      = None
-#                     c.save(update_fields=[
-#                         "status", "locked_permanently", "locked_by", "locked_at",
-#                         "internal_approval", "marketing_approval", "stakeholder_approval", "all_approved_at",
-#                     ])
-
-#                     ContentHistory.objects.create(
-#                         content=c, action_type="rejected",
-#                         performed_by=user, note=reason,
-#                     )
-                    
-#                     # from content.tasks import send_rejection_email_task
-#                     # send_rejection_email_task.delay(str(c.content_id), user.full_name, reason)
-
-#                     cache.delete(f"content_detail_{content_id}")
-#                     return Response({
-#                         "message":  "Content rejected and permanently locked.",
-#                         "status":   c.status,
-#                         "locked_permanently": c.locked_permanently,
-#                     })
-
-#                 # ── PUBLISH NOW (admin manual) ─────────────────────────────────
-#                 if action == "publish":
-#                     if group not in self.ADMIN_GROUPS:
-#                         return Response({"error": "Only admins can manually publish."}, status=403)
-#                     if not (c.internal_approval and c.marketing_approval and c.stakeholder_approval):
-#                         return Response(
-#                             {"error": "All three approvals must be collected before publishing."},
-#                             status=400,
-#                         )
-#                     if c.status == "published":
-#                         return Response({"message": "Content is already published."})
-#                     if c.status != "approved":
-#                         return Response(
-#                             {"error": f"Content must be in 'approved' status to publish. Current: '{c.status}'"},
-#                             status=400,
-#                         )
-#                     # Enforce 24h lock: after the window expires the content can only be published, not edited
-#                     # if c.all_approved_at is not None:
-#                     #     elapsed = (timezone.now() - c.all_approved_at).total_seconds()
-#                     #     if elapsed >= 86400:
-#                     #         # Window expired — content is locked; still allow admin to publish
-#                     #         pass  # publishing is always allowed for admin even after lock
-
-#                     c.status = "published"
-#                     c.save(update_fields=["status"])
-#                     ContentHistory.objects.create(
-#                         content=c, action_type="published",
-#                         performed_by=user, note="Manually published by admin.",
-#                     )
-#                     cache.delete(f"content_detail_{content_id}")
-#                     cache.delete("published_contents_list")
-#                     return Response({"message": "Content published!", "status": c.status})
-
-#                 # ── APPROVE ───────────────────────────────────────────────────
-#                 if c.status != "in_review":
-#                     return Response(
-#                         {"error": f"Content must be 'in_review' to approve. Current: '{c.status}'"},
-#                         status=400,
-#                     )
-
-#                 if c.locked_permanently:
-#                     return Response({"error": "Content is permanently locked."}, status=423)
-
-#                 # Step 1: Internal member
-#                 if group in self.INTERNAL_GROUPS:
-#                     if c.internal_approval:
-#                         return Response({"message": "Internal approval already recorded."})
-#                     c.internal_approval = True
-#                     c.save(update_fields=["internal_approval"])
-#                     ContentHistory.objects.create(
-#                         content=c, action_type="approved_internal", performed_by=user,
-#                         note="Internal member approved.",
-#                     )
-#                     # Now notify executives and admins
-#                     _notify_exec_admin_and_assignees(c)
-#                     return Response({
-#                         "message": "Internal approval recorded. Executives and admins have been notified.",
-#                         "internal_approval": c.internal_approval,
-#                         "marketing_approval": c.marketing_approval,
-#                         "stakeholder_approval": c.stakeholder_approval,
-#                     })
-
-#                 # Step 2a: Executive (stakeholder sign-off)
-#                 elif group in self.EXECUTIVE_GROUPS:
-#                     # if not c.internal_approval:
-#                     #     return Response(
-#                     #         {"error": "Content must be internally approved first."},
-#                     #         status=400,
-#                     #     )
-#                     if c.stakeholder_approval:
-#                         return Response({"message": "Stakeholder (executive) approval already recorded."})
-#                     c.stakeholder_approval = True
-#                     c.save(update_fields=["stakeholder_approval"])
-#                     ContentHistory.objects.create(
-#                         content=c, action_type="approved_stakeholder", performed_by=user,
-#                         note="Executive (stakeholder) approved.",
-#                     )
-#                     triple = c.check_and_mark_all_approved()
-#                     return Response({
-#                         "message":    "Stakeholder approval recorded." + (
-#                             " All approvals complete — content is now 'approved'. Admin may publish within 24h." if triple else ""
-#                         ),
-#                         "internal_approval":    c.internal_approval,
-#                         "marketing_approval":   c.marketing_approval,
-#                         "stakeholder_approval": c.stakeholder_approval,
-#                         "all_approved_at":      c.all_approved_at.isoformat() if c.all_approved_at else None,
-#                         "status":               c.status,
-#                     })
-
-#                 # Step 2b: Admin (marketing sign-off)
-#                 elif group in self.ADMIN_GROUPS:
-#                     if not c.internal_approval:
-#                         return Response(
-#                             {"error": "Content must be internally approved first."},
-#                             status=400,
-#                         )
-#                     if c.marketing_approval:
-#                         return Response({"message": "Marketing (admin) approval already recorded."})
-#                     c.marketing_approval = True
-#                     c.save(update_fields=["marketing_approval"])
-#                     ContentHistory.objects.create(
-#                         content=c, action_type="approved_marketing", performed_by=user,
-#                         note="Admin (marketing) approved.",
-#                     )
-#                     triple = c.check_and_mark_all_approved()
-#                     return Response({
-#                         "message":    "Marketing approval recorded." + (
-#                             " All approvals complete — content is now 'approved'. Admin may publish within 24h." if triple else ""
-#                         ),
-#                         "internal_approval":    c.internal_approval,
-#                         "marketing_approval":   c.marketing_approval,
-#                         "stakeholder_approval": c.stakeholder_approval,
-#                         "all_approved_at":      c.all_approved_at.isoformat() if c.all_approved_at else None,
-#                         "status":               c.status,
-#                     })
-#                 else:
-#                     return Response({"error": "Your group does not have approval rights."}, status=403)
-
-#         except Content.DoesNotExist:
-#             return Response({"error": "Content not found."}, status=404)
-
-#       except Exception as e:
-#           return Response({"error": str(e)})
 
 
 
@@ -1318,6 +1078,10 @@ class ApproveContent(APIView):
 
                 # INTERNAL APPROVAL
                 if group in self.INTERNAL_GROUPS:
+
+                    if c.author == user:  
+                        return Response({"error": "Author cannot approve their own content"},status=403)
+                    
                     if c.internal_approval:
                         return Response({"message": "Already internally approved"})
 
@@ -1540,7 +1304,7 @@ class PublishContentView(APIView):
 class ContentVersionHistory(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read" , "update", "admin"]   #not sure for this, who all needs to see the version
+    required_roles = ["read" , "admin"]   #not sure for this, who all needs to see the version
 
     def get(self, request, content_id):
         try:
@@ -1599,7 +1363,7 @@ class ContentVersionDetailView(APIView):
 class LatestVersionView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "admin"]
+    required_roles = ["read", "admin"]
 
     def get(self, request, content_id):
         try:
@@ -1875,7 +1639,7 @@ class ContentStatsView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "feedback", "admin"]
+    required_roles = ["read", "admin"]
 
     def get(self, request):
         qs = Content.objects.all()
