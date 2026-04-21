@@ -357,6 +357,7 @@ class ContentInitiationForm(models.Model):
         limit_choices_to={"role": "executive"},
         related_name="initiated_forms",
     )
+    initiated = models.BooleanField(default=False)   #ye content initiation ke liye hh
     content_type = models.TextField(help_text="Mention the type of content")
     campaign = models.ForeignKey(
         "board.Campaign",

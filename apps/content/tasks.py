@@ -50,7 +50,7 @@ def send_approval_email_task(self, user_ids, content_id, stage):
         }
         description = stage_labels.get(stage, f"has moved to '{stage}'")
         send_mail(
-            subject        = f"Action Required: '{c.title}' needs your review",
+            subject        = f"AMS | Action Required: '{c.title}' needs your review",
             message        = f"The content '{c.title}' {description}.\n\nPlease log in to review it.",
             from_email     = settings.EMAIL_HOST_USER,
             recipient_list = email_list,
@@ -166,7 +166,7 @@ def send_mention_email_task(self, mentioned_user_id, sender_name, content_title,
         )
 
         send_mail(
-            subject= f"You were mentioned in '{content_title}'",
+            subject= f"AMS | You were mentioned in '{content_title}'",
             message   = f"Hello {user.full_name},\n\n{sender_name} mentioned you in a comment.\n\n{cleaned_text}",
             from_email = settings.EMAIL_HOST_USER,
             recipient_list = [user.email],
@@ -183,7 +183,7 @@ def send_otp_email_task(self, email, otp):
     """Sends OTP email in background."""
     try:
         send_mail(
-            subject        = "Your Platform Verification Code",
+            subject        = "AMS | Your Platform Verification Code",
             message        = f"Your OTP is {otp}. It expires in 10 minutes.",
             from_email     = settings.EMAIL_HOST_USER,
             recipient_list = [email],
