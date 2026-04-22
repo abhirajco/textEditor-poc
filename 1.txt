@@ -34,6 +34,15 @@ docker exec -it platform_postgres psql -U platform_user -d postgres -c "DROP DAT
 docker exec -it platform_postgres psql -U platform_user -d postgres -c "CREATE DATABASE platform_db OWNER platform_user;"
 
 
+
+cd merged_project_v3_copy
+
+pytest                                           # all tests
+pytest tests/test_accounts.py                   # one file
+pytest tests/test_accounts.py::TestLogin        # one class
+pytest tests/test_rbac_and_security.py -v       # with verbose output
+pytest -x                                        # stop at first failure
+
 #content publishing is not working
 #mailing system is not working
 #article list should on show the latsest version of te draft

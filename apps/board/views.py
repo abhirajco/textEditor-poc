@@ -331,9 +331,12 @@ class EventListView(APIView):
         return Response(EventSerializer(event).data, status=201)
 
 
-@extend_schema(tags=["Event"])
+
+
+@extend_schema(
+    tags=["Event"],
+)
 class EventDetailView(APIView):
-    """GET / PATCH / DELETE a single event."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
     required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
@@ -344,33 +347,117 @@ class EventDetailView(APIView):
         except Event.DoesNotExist:
             return None
 
+    @extend_schema(
+        summary="Get event details",
+        description="Retrieve a single event by ID",
+        responses={
+            200: EventSerializer,
+            404: OpenApiResponse(description="Event not found"),
+        },
+    )
     def get(self, request, event_id):
         e = self._get(event_id)
         if not e:
             return Response({"error": "Event not found."}, status=404)
         return Response(EventSerializer(e).data)
 
+    @extend_schema(
+        summary="Update event",
+        description="Update event fields (only creator or admin allowed)",
+        request=EventSerializer,
+        responses={
+            200: EventSerializer,
+            403: OpenApiResponse(description="Forbidden"),
+            404: OpenApiResponse(description="Event not found"),
+        },
+        examples=[
+            OpenApiExample(
+                "Update Event Example",
+                value={
+                    "title": "Updated Event",
+                    "description": "New description",
+                    "start_date": "2026-04-20",
+                    "end_date": "2026-04-25"
+                },
+                request_only=True,
+            )
+        ]
+    )
     def patch(self, request, event_id):
         e = self._get(event_id)
         if not e:
             return Response({"error": "Event not found."}, status=404)
         if request.user.role != "admin" and e.created_by != request.user:
             return Response({"error": "Only creator or admin can edit."}, status=403)
+
         for field in ["title", "description", "start_date", "end_date"]:
             if field in request.data:
                 setattr(e, field, request.data[field])
         e.save()
+
         return Response(EventSerializer(e).data)
 
+    @extend_schema(
+        summary="Delete event",
+        description="Delete an event (only creator or admin allowed)",
+        responses={
+            200: OpenApiResponse(description="Event deleted"),
+            403: OpenApiResponse(description="Forbidden"),
+            404: OpenApiResponse(description="Event not found"),
+        },
+    )
     def delete(self, request, event_id):
         e = self._get(event_id)
         if not e:
             return Response({"error": "Event not found."}, status=404)
         if request.user.role != "admin" and e.created_by != request.user:
             return Response({"error": "Only creator or admin can delete."}, status=403)
+
         e.delete()
         _bust_task_cache()
         return Response({"message": "Event deleted."})
+
+
+
+# class EventDetailView(APIView):
+#     """GET / PATCH / DELETE a single event."""
+#     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+#     required_area  = "content"
+#     required_roles = ["read", "write", "update", "admin"]
+
+#     def _get(self, event_id):
+#         try:
+#             return Event.objects.select_related("campaign", "created_by").get(event_id=event_id)
+#         except Event.DoesNotExist:
+#             return None
+
+#     def get(self, request, event_id):
+#         e = self._get(event_id)
+#         if not e:
+#             return Response({"error": "Event not found."}, status=404)
+#         return Response(EventSerializer(e).data)
+
+#     def patch(self, request, event_id):
+#         e = self._get(event_id)
+#         if not e:
+#             return Response({"error": "Event not found."}, status=404)
+#         if request.user.role != "admin" and e.created_by != request.user:
+#             return Response({"error": "Only creator or admin can edit."}, status=403)
+#         for field in ["title", "description", "start_date", "end_date"]:
+#             if field in request.data:
+#                 setattr(e, field, request.data[field])
+#         e.save()
+#         return Response(EventSerializer(e).data)
+
+#     def delete(self, request, event_id):
+#         e = self._get(event_id)
+#         if not e:
+#             return Response({"error": "Event not found."}, status=404)
+#         if request.user.role != "admin" and e.created_by != request.user:
+#             return Response({"error": "Only creator or admin can delete."}, status=403)
+#         e.delete()
+#         _bust_task_cache()
+#         return Response({"message": "Event deleted."})
 
 
 @extend_schema(tags=["Event"])

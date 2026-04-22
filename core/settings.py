@@ -230,3 +230,10 @@ CELERY_TASK_SERIALIZER   = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE          = "UTC"
 CELERY_TASK_TRACK_STARTED = True
+
+
+
+if 'pytest' in sys.modules or 'test' in sys.argv:
+    DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+    EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'

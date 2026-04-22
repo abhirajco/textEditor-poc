@@ -42,7 +42,7 @@ from accounts.models import User
 from utils.notifications.services import handle_mentions_and_notifications
 from utils.permissions.base import HasRBACPermission
 from django.utils import timezone
-
+from django.shortcuts import get_object_or_404
 
 
 LOCK_WINDOW_SECONDS =  120
@@ -156,9 +156,12 @@ class ContentDetailView(APIView):
                     c.internal_approval and c.marketing_approval and c.stakeholder_approval
                     and c.status == "approved"
                 ),
+            
             })
         except Content.DoesNotExist:
             return Response({"error": "Content not found."}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,19 +186,6 @@ class ContentLock(APIView):
                         status=423,
                     )
 
-                # 24-hour post-approval edit lock
-                # if (
-                #     c.internal_approval and c.marketing_approval and c.stakeholder_approval
-                #     and c.all_approved_at is not None
-                # ):
-                #     #from django.utils import timezone
-                #     elapsed = timezone.now() - c.all_approved_at
-                #     if elapsed.total_seconds() >= 86400:
-                #         return Response(
-                #             {"error": "Content is locked: the 24-hour edit window after full approval has expired."},
-                #             status=423,
-                #         )
-
                 if is_content_locked(c):
                     return Response(get_content_lock_error(), status=423)
 
@@ -212,7 +202,7 @@ class ContentLock(APIView):
             except Content.DoesNotExist:
                 return Response({"error": "Content not found."}, status=404)
             except Exception as e:
-                return Response({"error": str(e)})
+                return Response({"error": str(e)} , status=500)
 
     def delete(self, request, content_id):
         try:
@@ -639,8 +629,13 @@ class InitiateContentView(APIView):
         ##have to add the brief also in the task
         try:
             with transaction.atomic():
-        
-                sme_user = User.objects.get(pk=sme_id, role="sme")
+                
+                try:
+                    sme_user = User.objects.get(pk=sme_id, role="sme")
+                except sme_user.DoesNotExist:
+                    return Response({"error": "SME not found."}, status=404)
+
+                #sme_user = User.objects.get(pk=sme_id, role="sme")
                 form = ContentInitiationForm.objects.create(
                     title=title,
                     brief=brief,
@@ -705,7 +700,7 @@ class FormListView(APIView):
 
 class ParticularFormView(APIView):
     """
-    View all initiation forms
+    particular form
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
@@ -757,11 +752,12 @@ class StartFromForm(APIView):
         event_id = request.data.get("event_id") or None
         sme_id = request.data.get("sme_id") or None  #from the form itself
         executive_id = request.data.get("created_by")
+        form_id = request.data.get("form_id")
 
-        ex = User.objects.get(user_id=executive_id)
+        ex = get_object_or_404(User ,user_id=executive_id)
 
         if not all([title, brief, content_type, campaign_id]):
-            return Response({"error": "title, brief, content_type, campaign_id and sme id are required."}, status=400)
+            return Response({"error": "title, brief, content_type and campaign_id are required."}, status=400)
 
         try:
             campaign = Campaign.objects.get(pk=campaign_id)
@@ -775,6 +771,8 @@ class StartFromForm(APIView):
             except Event.DoesNotExist:
                 return Response({"error": "Event not found for this campaign."}, status=404)
 
+        form = get_object_or_404(ContentInitiationForm ,pk=form_id)
+        
         ##have to add the brief also in the task
         try:
             with transaction.atomic():
@@ -791,20 +789,44 @@ class StartFromForm(APIView):
                      performed_by = request.user,
                      detail       = f"Task created via content popup for '{title}'.",
                  )
-                content = Content.objects.create(
+                # content = Content.objects.create(
+                #     title        = title,
+                #     body         = brief,
+                #     author       = request.user,
+                #     status       = "draft",
+                #     content_type = content_type,
+                #     tags         = tags,
+                #     campaign     = campaign,
+                #     event   = event,
+                #     task = task,
+                # )
+
+                content = Content(
                     title        = title,
-                    body         = brief,
+                    body    = brief,
                     author       = request.user,
                     status       = "draft",
                     content_type = content_type,
                     tags         = tags,
                     campaign     = campaign,
-                    event   = event,
-                    task = task,
+                    event        = event,
+                    task         = task,
                 )
+
+                content._version_data = {
+                    "title": title,
+                    "body": brief,
+                    "image_url": None,
+                    "changed_by_id": str(request.user.user_id),
+                }
+
+                content.save()
                 ContentHistory.objects.create(
                     content=content, action_type="initiated", performed_by=request.user
                 )
+
+                form.initiated = True,
+                form.save()
                 # sme_user = User.objects.get(user_id=sme_id, role="sme")
     
                 return Response({

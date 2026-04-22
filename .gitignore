@@ -64,3 +64,5 @@ __azurite_db*__.json
 
 #for me
 1.txt
+
+tests/
