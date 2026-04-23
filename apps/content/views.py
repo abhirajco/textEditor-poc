@@ -492,7 +492,7 @@ class SubmitContentView(APIView):
     )
 )
 class NewContentButton(APIView):
-    """POST /api/content/contents/startFromForm/ — executive fills initiation form."""
+    
     permission_classes = [HasRBACPermission]
     required_area  = "content"
     required_roles = ["write" , "admin"]
@@ -532,11 +532,10 @@ class NewContentButton(APIView):
         try:
             with transaction.atomic():
                 task = Task.objects.create(
-                    title       = f"[Content] {title}",
-                    description = brief,
-                    campaign    = campaign,
-                    event       = event,
-                    content_type = content_type,
+                    title = f"[Content] {title}",
+                    description= brief,
+                    campaign  = campaign,
+                    event = event,
                     assigned_to  = request.user,
                     assigned_by = request.user,
                 )
@@ -548,14 +547,14 @@ class NewContentButton(APIView):
                 )
                 content = Content.objects.create(
                     title  = title,
-                    body    = brief,
-                    author   = request.user,
-                    status       = "draft",
+                    body = brief,
+                    author= request.user,
+                    status = "draft",
                     content_type = content_type,
-                    tags         = tags,
-                    campaign     = campaign,
-                    event        = event,
-                    task      = task,
+                    tags  = tags,
+                    campaign = campaign,
+                    event = event,
+                    task  = task,
                 )
                 ContentHistory.objects.create(
                     content=content, action_type="initiated", performed_by=request.user
@@ -1111,6 +1110,12 @@ class ApproveContent(APIView):
                         return Response({"message": "Already internally approved"})
 
                     c.internal_approval = True
+
+                    triple = c.check_and_mark_all_approved()
+
+                    if triple:
+                        c.status= "approved"
+
                     c.save(update_fields=["internal_approval"])
 
                     ContentHistory.objects.create(

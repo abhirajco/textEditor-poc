@@ -18,6 +18,11 @@ from rest_framework import serializers as drf_serializers
 from django.http import Http404
 import uuid
 from django.shortcuts import get_object_or_404
+
+import logging
+ 
+logger = logging.getLogger(__name__)
+
 # ==============================================================================
 # AUTH VIEWS
 # ==============================================================================
@@ -212,155 +217,420 @@ class PeopleWithoutRole(APIView):
         return Response(data)
 
 
-@extend_schema(
-    tags=['Users'],
-    request=inline_serializer(
-        name='AssignRoleRequest',
-        fields={
-            'group': drf_serializers.ChoiceField(
-                choices=['admin', 'executive', 'internal', 'external', 'user'],
-                help_text='Organisational group for the user',
-            ),
-            'role': drf_serializers.ChoiceField(
-                choices=['admin', 'exec_approver', 'executive', 'writer', 'reviewer', 'sme', 'none'],
-                help_text='Specific role within the group',
-            ),
-        }
-    )
-)
+# @extend_schema(
+#     tags=['Users'],
+#     request=inline_serializer(
+#         name='AssignRoleRequest',
+#         fields={
+#             'group': drf_serializers.ChoiceField(
+#                 choices=['admin', 'executive', 'internal', 'external', 'user'],
+#                 help_text='Organisational group for the user',
+#             ),
+#             'role': drf_serializers.ChoiceField(
+#                 choices=['admin', 'exec_approver', 'executive', 'writer', 'reviewer', 'sme', 'none'],
+#                 help_text='Specific role within the group',
+#             ),
+#         }
+#     )
+# )
+# class AssignRole(APIView):
+#     """
+#     Admin assigns group + role to a user, syncs Django Group, and rebuilds the
+#     RBAC matrix. Handles roles for both Insight (content) and Kanban (board).
+#     """
+    
+    
+#     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+#     required_area = "users"
+#     required_role = "admin"
+
+#     def post(self, request, user_id):
+#       try:
+#         new_group = request.data.get('group', '').lower().strip()
+#         new_role = request.data.get('role',  'none').lower().strip()
+
+#         try:
+#             uuid.UUID(user_id)
+#         except ValueError:
+#             return Response({"error"} ,status=404)
+
+#         valid_groups = [c[0] for c in User.GROUP_CHOICES]
+#         valid_roles = [c[0] for c in User.ROLE_CHOICES]
+
+#         if new_group not in valid_groups or new_role not in valid_roles:
+#             return Response({"error": f"Invalid group or role."}, status=400)
+
+#         try:
+#             with transaction.atomic():
+#                 user = User.objects.get(user_id=user_id)
+#                 user.group = new_group
+#                 user.role = new_role
+
+#                 if new_group == 'admin':
+#                     user.is_staff = True
+#                     user.is_superuser = True
+
+#                 user.save()
+
+#                 # Sync Django Group
+#                 django_group_name = new_group.capitalize()
+#                 django_group, _ = Group.objects.get_or_create(name=django_group_name)
+#                 user.groups.clear()
+#                 user.groups.add(django_group)
+
+#                 # Rebuild RBAC for this group
+#                 self._setup_rbac(django_group, new_group, new_role)
+
+#             return Response({
+#                 "message": f"Updated {user.email} → group={new_group}, role={new_role}. RBAC synced."
+#             })
+
+#         except User.DoesNotExist:
+#             return Response({"error": "User not found."}, status=404)
+#       except Exception as e:
+#           return Response({"error": str(e)} , status=404)
+
+#     def _setup_rbac(self, django_group, group, role):
+#         """
+#         Wipe and rebuild RBAC rules.
+
+#         Admin→ admin action on ALL areas (content + board + users + reports + settings)
+#         Executive→ content: read + feedback + promote  |  board: read + write + update
+#         Internal → depends on role:
+#         writer → content: write + update  |  board: read + write + update
+#         eviewer → content: update + feedback + promote  |  board: read + write + update
+#         External/SME → content: update + feedback + promote  (no board access)
+#         """
+#         RBAC.objects.filter(application_group=django_group).delete()
+
+#         if group == 'admin':
+#             for area in ['content', 'board', 'users', 'reports', 'settings']:
+#                 RBAC.objects.create(application_group=django_group, application_area=area, application_action='admin')
+
+#         elif group == 'executive':
+#             # Insight content access
+#             for action in ['read', 'approve' , 'initiate']:
+#                 RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
+#             # Kanban board access
+#             for action in ['read', 'write', 'update']:
+#                 RBAC.objects.create(application_group=django_group, application_area='board', application_action=action)
+
+#         elif group == 'internal':
+#             if role == 'writer':
+#                 # Insight
+#                 for action in ['read' , 'write', 'update' , 'approve']:
+#                     RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
+#                 # Kanban
+#                 for action in ['read', 'write', 'update']:
+#                     RBAC.objects.create(application_group=django_group, application_area='board', application_action=action)
+
+#             elif role == 'reviewer':
+#                 # Insight
+#                 for action in ['read' , 'update', 'approve']:
+#                     RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
+#                 # Kanban
+#                 for action in ['read', 'write', 'update']:
+#                     RBAC.objects.create(application_group=django_group, application_area='board', application_action=action)
+
+#         elif group == 'external' and role == 'sme':
+#             # SMEs only get Insight content access — no board access
+#             for action in ['read']:
+#                 RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
+
+
+
+
+# @extend_schema(tags=['Users'])
+# class DeleteUser(APIView):
+#     """Permanently deletes a user. Admin only."""
+#     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+#     required_area = "users"
+#     required_role = "admin"
+
+#     def delete(self, request, user_id):
+#         try:
+#             uuid.UUID(str(user_id))
+#         except ValueError:
+#             return Response({"error"} ,status=404)
+#         try:
+#             user = get_object_or_404()(User , user_id=user_id)
+
+#             if user == request.user:
+#                 return Response({"error": "You cannot delete your own admin account."}, status=400)
+
+#             email = user.email
+#             user.delete()
+#             return Response({"message": f"User '{email}' has been permanently deleted."})
+
+#         except User.DoesNotExist:
+#             return Response({"error": "User not found."}, status=404)
+
 class AssignRole(APIView):
     """
     Admin assigns group + role to a user, syncs Django Group, and rebuilds the
     RBAC matrix. Handles roles for both Insight (content) and Kanban (board).
     """
     
-    
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
     required_area = "users"
     required_role = "admin"
-
+ 
     def post(self, request, user_id):
-      try:
-        new_group = request.data.get('group', '').lower().strip()
-        new_role = request.data.get('role',  'none').lower().strip()
-
+        """Assign group and role to user with comprehensive error handling."""
         try:
-            uuid.UUID(user_id)
-        except ValueError:
-            return Response({"error"} ,status=404)
-
-        valid_groups = [c[0] for c in User.GROUP_CHOICES]
-        valid_roles = [c[0] for c in User.ROLE_CHOICES]
-
-        if new_group not in valid_groups or new_role not in valid_roles:
-            return Response({"error": f"Invalid group or role."}, status=400)
-
-        try:
-            with transaction.atomic():
-                user = User.objects.get(user_id=user_id)
-                user.group = new_group
-                user.role = new_role
-
-                if new_group == 'admin':
-                    user.is_staff = True
-                    user.is_superuser = True
-
-                user.save()
-
-                # Sync Django Group
-                django_group_name = new_group.capitalize()
-                django_group, _ = Group.objects.get_or_create(name=django_group_name)
-                user.groups.clear()
-                user.groups.add(django_group)
-
-                # Rebuild RBAC for this group
-                self._setup_rbac(django_group, new_group, new_role)
-
-            return Response({
-                "message": f"Updated {user.email} → group={new_group}, role={new_role}. RBAC synced."
-            })
-
-        except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=404)
-      except Exception as e:
-          return Response({"error": str(e)} , status=404)
-
+            # Validate UUID format (double-check, though URL converter should catch it)
+            try:
+                user_uuid = uuid.UUID(str(user_id))
+            except (ValueError, TypeError, AttributeError):
+                logger.warning(f"Invalid UUID format: {user_id}")
+                return Response(
+                    {"error": "Invalid user ID format. Expected valid UUID."}, 
+                    status=400
+                )
+ 
+            # Validate request data
+            new_group = request.data.get('group', '').lower().strip()
+            new_role = request.data.get('role', 'none').lower().strip()
+ 
+            if not new_group or not new_role:
+                return Response(
+                    {"error": "Both 'group' and 'role' fields are required."}, 
+                    status=400
+                )
+ 
+            # Get valid choices from User model
+            try:
+                valid_groups = [c[0] for c in User.GROUP_CHOICES]
+                valid_roles = [c[0] for c in User.ROLE_CHOICES]
+            except (AttributeError, TypeError) as e:
+                logger.error(f"Error accessing User model choices: {e}")
+                return Response(
+                    {"error": "Server configuration error."}, 
+                    status=500
+                )
+ 
+            # Validate group and role against allowed choices
+            if new_group not in valid_groups:
+                return Response(
+                    {"error": f"Invalid group '{new_group}'. Allowed: {', '.join(valid_groups)}"}, 
+                    status=400
+                )
+            
+            if new_role not in valid_roles:
+                return Response(
+                    {"error": f"Invalid role '{new_role}'. Allowed: {', '.join(valid_roles)}"}, 
+                    status=400
+                )
+ 
+            # Atomic transaction for consistency
+            try:
+                with transaction.atomic():
+                    # Get user or raise 404
+                    try:
+                        user = User.objects.get(user_id=user_uuid)
+                    except User.DoesNotExist:
+                        logger.warning(f"User not found: {user_uuid}")
+                        return Response(
+                            {"error": "User not found."}, 
+                            status=404
+                        )
+ 
+                    # Update user fields
+                    user.group = new_group
+                    user.role = new_role
+ 
+                    # Set staff/superuser flags for admin group
+                    if new_group == 'admin':
+                        user.is_staff = True
+                        user.is_superuser = True
+                    else:
+                        # Revoke admin privileges if demoting from admin
+                        user.is_staff = False
+                        user.is_superuser = False
+ 
+                    user.save()
+ 
+                    # Sync Django Group
+                    try:
+                        django_group_name = new_group.capitalize()
+                        django_group, _ = Group.objects.get_or_create(name=django_group_name)
+                        user.groups.clear()
+                        user.groups.add(django_group)
+                    except Exception as e:
+                        logger.error(f"Error syncing Django groups: {e}")
+                        raise
+ 
+                    # Rebuild RBAC for this group
+                    try:
+                        self._setup_rbac(django_group, new_group, new_role)
+                    except Exception as e:
+                        logger.error(f"Error setting up RBAC: {e}")
+                        raise
+ 
+                return Response({
+                    "message": f"Updated {user.email} → group={new_group}, role={new_role}. RBAC synced.",
+                    "user_id": str(user.user_id),
+                    "group": new_group,
+                    "role": new_role
+                }, status=200)
+ 
+            except transaction.TransactionManagementError as e:
+                logger.error(f"Transaction error: {e}")
+                return Response(
+                    {"error": "Database transaction failed. Please try again."}, 
+                    status=500
+                )
+ 
+        except Exception as e:
+            logger.exception(f"Unexpected error in AssignRole: {e}")
+            return Response(
+                {"error": "An unexpected error occurred. Please contact support."}, 
+                status=500
+            )
+ 
     def _setup_rbac(self, django_group, group, role):
         """
         Wipe and rebuild RBAC rules.
-
-        Admin→ admin action on ALL areas (content + board + users + reports + settings)
-        Executive→ content: read + feedback + promote  |  board: read + write + update
-        Internal → depends on role:
-        writer → content: write + update  |  board: read + write + update
-        eviewer → content: update + feedback + promote  |  board: read + write + update
-        External/SME → content: update + feedback + promote  (no board access)
+ 
+        Admin      → admin action on ALL areas (content + board + users + reports + settings)
+        Executive  → content: read + approve + initiate  |  board: read + write + update
+        Internal   → depends on role:
+                     writer   → content: read + write + update + approve  |  board: read + write + update
+                     reviewer → content: read + update + approve  |  board: read + write + update
+        External   → SME only: content: read (no board access)
         """
-        RBAC.objects.filter(application_group=django_group).delete()
-
-        if group == 'admin':
-            for area in ['content', 'board', 'users', 'reports', 'settings']:
-                RBAC.objects.create(application_group=django_group, application_area=area, application_action='admin')
-
-        elif group == 'executive':
-            # Insight content access
-            for action in ['read', 'approve' , 'initiate']:
-                RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
-            # Kanban board access
-            for action in ['read', 'write', 'update']:
-                RBAC.objects.create(application_group=django_group, application_area='board', application_action=action)
-
-        elif group == 'internal':
-            if role == 'writer':
-                # Insight
-                for action in ['read' , 'write', 'update' , 'approve']:
-                    RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
-                # Kanban
+        try:
+            # Delete existing RBAC rules for this group
+            RBAC.objects.filter(application_group=django_group).delete()
+ 
+            if group == 'admin':
+                for area in ['content', 'board', 'users', 'reports', 'settings']:
+                    RBAC.objects.create(
+                        application_group=django_group,
+                        application_area=area,
+                        application_action='admin'
+                    )
+ 
+            elif group == 'executive':
+                # Insight content access
+                for action in ['read', 'approve', 'initiate']:
+                    RBAC.objects.create(
+                        application_group=django_group,
+                        application_area='content',
+                        application_action=action
+                    )
+                # Kanban board access
                 for action in ['read', 'write', 'update']:
-                    RBAC.objects.create(application_group=django_group, application_area='board', application_action=action)
-
-            elif role == 'reviewer':
-                # Insight
-                for action in ['read' , 'update', 'approve']:
-                    RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
-                # Kanban
-                for action in ['read', 'write', 'update']:
-                    RBAC.objects.create(application_group=django_group, application_area='board', application_action=action)
-
-        elif group == 'external' and role == 'sme':
-            # SMEs only get Insight content access — no board access
-            for action in ['read']:
-                RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
-
-
-
-
+                    RBAC.objects.create(
+                        application_group=django_group,
+                        application_area='board',
+                        application_action=action
+                    )
+ 
+            elif group == 'internal':
+                if role == 'writer':
+                    # Insight
+                    for action in ['read', 'write', 'update', 'approve']:
+                        RBAC.objects.create(
+                            application_group=django_group,
+                            application_area='content',
+                            application_action=action
+                        )
+                    # Kanban
+                    for action in ['read', 'write', 'update']:
+                        RBAC.objects.create(
+                            application_group=django_group,
+                            application_area='board',
+                            application_action=action
+                        )
+ 
+                elif role == 'reviewer':
+                    # Insight
+                    for action in ['read', 'update', 'approve']:
+                        RBAC.objects.create(
+                            application_group=django_group,
+                            application_area='content',
+                            application_action=action
+                        )
+                    # Kanban
+                    for action in ['read', 'write', 'update']:
+                        RBAC.objects.create(
+                            application_group=django_group,
+                            application_area='board',
+                            application_action=action
+                        )
+ 
+            elif group == 'external' and role == 'sme':
+                # SMEs only get Insight content access — no board access
+                RBAC.objects.create(
+                    application_group=django_group,
+                    application_area='content',
+                    application_action='read'
+                )
+ 
+        except Exception as e:
+            logger.error(f"Error in _setup_rbac: {e}")
+            raise
+ 
+ 
 @extend_schema(tags=['Users'])
 class DeleteUser(APIView):
     """Permanently deletes a user. Admin only."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
     required_area = "users"
     required_role = "admin"
-
+ 
     def delete(self, request, user_id):
+        """Delete a user with comprehensive error handling."""
         try:
-            uuid.UUID(str(user_id))
-        except ValueError:
-            return Response({"error"} ,status=404)
-        try:
-            user = get_object_or_404()(User , user_id=user_id)
-
-            if user == request.user:
-                return Response({"error": "You cannot delete your own admin account."}, status=400)
-
-            email = user.email
-            user.delete()
-            return Response({"message": f"User '{email}' has been permanently deleted."})
-
-        except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=404)
-
-
+            # Validate UUID format
+            try:
+                user_uuid = uuid.UUID(str(user_id))
+            except (ValueError, TypeError, AttributeError):
+                logger.warning(f"Invalid UUID format: {user_id}")
+                return Response(
+                    {"error": "Invalid user ID format. Expected valid UUID."}, 
+                    status=400
+                )
+ 
+            try:
+                # Get user or raise 404
+                user = get_object_or_404(User, user_id=user_uuid)
+ 
+                # Prevent self-deletion
+                if user == request.user:
+                    logger.warning(f"User {request.user.user_id} attempted to delete own account")
+                    return Response(
+                        {"error": "You cannot delete your own admin account."}, 
+                        status=400
+                    )
+ 
+                email = user.email
+                user_id_log = str(user.user_id)
+ 
+                # Delete user
+                user.delete()
+                
+                logger.info(f"User deleted: {email} (ID: {user_id_log})")
+                return Response(
+                    {"message": f"User '{email}' has been permanently deleted."}, 
+                    status=200
+                )
+ 
+            except User.DoesNotExist:
+                logger.warning(f"User not found: {user_uuid}")
+                return Response(
+                    {"error": "User not found."}, 
+                    status=404
+                )
+ 
+        except Exception as e:
+            logger.exception(f"Unexpected error in DeleteUser: {e}")
+            return Response(
+                {"error": "An unexpected error occurred. Please contact support."}, 
+                status=500
+            )
+ 
 
 
 
