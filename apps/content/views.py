@@ -588,6 +588,7 @@ class NewContentButton(APIView):
             "brief":  drf_serializers.CharField(),
             "content_type": drf_serializers.CharField(),
             "campaign_id": drf_serializers.CharField(),
+            "sme_id": drf_serializers.CharField(),
             "tags":drf_serializers.CharField(required=False, allow_blank=True),
             "event_id": drf_serializers.CharField(required=False, allow_blank=True, allow_null=True),
         }
@@ -659,12 +660,12 @@ class InitiateContentView(APIView):
 @extend_schema(tags=["Content"])
 class FormListView(APIView):
     """
-    GET /api/content/initiation-forms/
+    
     View all initiation forms
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["update", "admin"]  # writer reviwer and admin
+    required_roles = ["read", "admin"]  # writer reviwer and admin
 
     def get(self, request):
         try:
@@ -704,7 +705,7 @@ class ParticularFormView(APIView):
     """
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["update", "admin"]  # adjust if needed
+    required_roles = ["read", "admin"]  # adjust if needed
 
     def get(self, request , form_id):
         try:
@@ -728,6 +729,7 @@ class ParticularFormView(APIView):
             "brief":  drf_serializers.CharField(),
             "content_type": drf_serializers.CharField(),
             "campaign_id": drf_serializers.CharField(),
+            "form_id": drf_serializers.CharField(),
             "tags":drf_serializers.CharField(required=False, allow_blank=True),
             "event_id": drf_serializers.CharField(required=False, allow_blank=True, allow_null=True),
         }
@@ -825,7 +827,8 @@ class StartFromForm(APIView):
                     content=content, action_type="initiated", performed_by=request.user
                 )
 
-                form.initiated = True,
+                form.initiated = True
+                form.content = content
                 form.save()
                 # sme_user = User.objects.get(user_id=sme_id, role="sme")
     
@@ -1034,7 +1037,7 @@ class ContentHistory2APIView(APIView):
 
     permission_classes = [HasRBACPermission]
     required_area = "content"
-    required_roles = ["read"]
+    required_roles = ["read" , "admin"]
 
     def get(self, request, content_id):
      try:

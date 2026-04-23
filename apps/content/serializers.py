@@ -87,6 +87,7 @@ class ContentInitiationFormSerializer(serializers.ModelSerializer):
             "form_id",
             "title",
             "brief",
+            "initiated",
             "content_type",
             "campaign",
             "event",

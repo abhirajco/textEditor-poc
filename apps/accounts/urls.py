@@ -6,6 +6,7 @@ from .views import (
     DeleteUser, AdminUserRBACListView, UserSearchView,
 )
 
+
 urlpatterns = [
     # ── Auth Flow ──────────────────────────────────────────────────────────
     path('signup/', SignupView.as_view(),  name='signup'),

@@ -15,6 +15,9 @@ from utils.notifications.services import send_otp_via_email
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, inline_serializer
 from drf_spectacular.types import OpenApiTypes
 from rest_framework import serializers as drf_serializers
+from django.http import Http404
+import uuid
+from django.shortcuts import get_object_or_404
 # ==============================================================================
 # AUTH VIEWS
 # ==============================================================================
@@ -230,13 +233,21 @@ class AssignRole(APIView):
     Admin assigns group + role to a user, syncs Django Group, and rebuilds the
     RBAC matrix. Handles roles for both Insight (content) and Kanban (board).
     """
+    
+    
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
     required_area = "users"
     required_role = "admin"
 
     def post(self, request, user_id):
+      try:
         new_group = request.data.get('group', '').lower().strip()
         new_role = request.data.get('role',  'none').lower().strip()
+
+        try:
+            uuid.UUID(user_id)
+        except ValueError:
+            return Response({"error"} ,status=404)
 
         valid_groups = [c[0] for c in User.GROUP_CHOICES]
         valid_roles = [c[0] for c in User.ROLE_CHOICES]
@@ -271,6 +282,8 @@ class AssignRole(APIView):
 
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=404)
+      except Exception as e:
+          return Response({"error": str(e)} , status=404)
 
     def _setup_rbac(self, django_group, group, role):
         """
@@ -320,6 +333,8 @@ class AssignRole(APIView):
                 RBAC.objects.create(application_group=django_group, application_area='content', application_action=action)
 
 
+
+
 @extend_schema(tags=['Users'])
 class DeleteUser(APIView):
     """Permanently deletes a user. Admin only."""
@@ -329,7 +344,11 @@ class DeleteUser(APIView):
 
     def delete(self, request, user_id):
         try:
-            user = User.objects.get(user_id=user_id)
+            uuid.UUID(str(user_id))
+        except ValueError:
+            return Response({"error"} ,status=404)
+        try:
+            user = get_object_or_404()(User , user_id=user_id)
 
             if user == request.user:
                 return Response({"error": "You cannot delete your own admin account."}, status=400)
@@ -340,6 +359,9 @@ class DeleteUser(APIView):
 
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=404)
+
+
+
 
 
 @extend_schema(tags=['Users'])
