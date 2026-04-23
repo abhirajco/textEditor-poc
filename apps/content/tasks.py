@@ -49,12 +49,15 @@ def send_approval_email_task(self, user_ids, content_id, stage):
             "pending_exec_admin": "has been approved internally and awaits your review",
         }
         description = stage_labels.get(stage, f"has moved to '{stage}'")
-        send_mail(
-            subject        = f"AMS | Action Required: '{c.title}' needs your review",
-            message        = f"The content '{c.title}' {description}.\n\nPlease log in to review it.",
-            from_email     = settings.EMAIL_HOST_USER,
-            recipient_list = email_list,
-            fail_silently  = False,
+    
+
+        for email in email_list:
+            send_mail(
+            subject="AMS | Action Required",
+            message=f"The content '{c.title}' {description}.",
+            from_email=settings.EMAIL_HOST_USER,
+            recipient_list=[email],  # 👈 only one user
+            fail_silently=False,
         )
         logger.info(f"Approval email sent for content {content_id} stage={stage} to {email_list}")
     except Exception as exc:
@@ -62,7 +65,7 @@ def send_approval_email_task(self, user_ids, content_id, stage):
 
 
 # ── Rejection email ───────────────────────────────────────────────────────────
-
+#not using it for now
 @shared_task(bind=True, max_retries=3, default_retry_delay=15)
 def send_rejection_email_task(self, content_id, rejected_by_name, reason):
     """Notifies the author (and all stakeholders) that content was rejected."""
@@ -86,60 +89,6 @@ def send_rejection_email_task(self, content_id, rejected_by_name, reason):
     except Exception as exc:
         raise self.retry(exc=exc)
 
-
-# ── Auto-publish after 24h ────────────────────────────────────────────────────
-
-# @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-# def auto_publish_content_task(self, content_id):
-#     """
-#     Fires 24 hours after all_approved_at is stamped.
-#     Publishes the content only if it is still fully approved and not rejected.
-#     """
-#     try:
-#         from content.models import Content, ContentHistory
-#         from django.utils import timezone
-
-#         c = Content.objects.get(content_id=content_id)
-
-#         # Safety checks — if anything changed in the 24h window, abort.
-#         if c.status in ("published", "rejected"):
-#             logger.info(f"auto_publish: content {content_id} already in final state {c.status}, skipping.")
-#             return
-
-#         if not (c.internal_approval and c.marketing_approval and c.stakeholder_approval):
-#             logger.info(f"auto_publish: content {content_id} no longer fully approved, skipping.")
-#             return
-
-#         if c.locked_permanently:
-#             logger.info(f"auto_publish: content {content_id} is locked permanently, skipping.")
-#             return
-
-#         c.status = "published"
-#         c.save(update_fields=["status"])
-
-#         ContentHistory.objects.create(
-#             content      = c,
-#             action_type  = "auto_published",
-#             performed_by = None,
-#             note         = "Auto-published 24 hours after all three approvals were received.",
-#         )
-
-#         send_mail(
-#             subject        = f"Published: '{c.title}'",
-#             message        = (
-#                 f"Hi {c.author.full_name},\n\n"
-#                 f"Your content '{c.title}' has been automatically published after receiving "
-#                 f"all required approvals.\n\nCongratulations!"
-#             ),
-#             from_email     = settings.EMAIL_HOST_USER,
-#             recipient_list = [c.author.email],
-#             fail_silently  = True,
-#         )
-#         logger.info(f"auto_publish: content {content_id} published successfully.")
-#     except Content.DoesNotExist:
-#         logger.error(f"auto_publish: content {content_id} not found.")
-#     except Exception as exc:
-#         raise self.retry(exc=exc)
 
 
 # ── Mention email ─────────────────────────────────────────────────────────────
@@ -173,6 +122,8 @@ def send_mention_email_task(self, mentioned_user_id, sender_name, content_title,
             fail_silently  = False,
         )
 
+        
+
     except Exception as exc:
         raise self.retry(exc=exc)
 
@@ -205,12 +156,20 @@ def send_sme_assignment_email_task(self, content_id):
         email_list  = [a.sme.email for a in assignments if a.sme.is_active]
         if not email_list:
             return
-        send_mail(
-            subject        = f"Action Required: Assigned to '{c.title}'",
-            message        = f"You are the appointed SME for '{c.title}'. Please review it.",
-            from_email     = settings.EMAIL_HOST_USER,
-            recipient_list = email_list,
-            fail_silently  = False,
-        )
+        # send_mail(
+        #     subject        = f"Action Required: Assigned to '{c.title}'",
+        #     message        = f"You are the appointed SME for '{c.title}'. Please review it.",
+        #     from_email     = settings.EMAIL_HOST_USER,
+        #     recipient_list = email_list,
+        #     fail_silently  = False,
+        # )
+        for email in email_list:
+            send_mail(
+            subject=f"AMS | Action Required: Assigned to '{c.title}'",
+            message=f"You are the appointed SME for '{c.title}'. Please review it.",
+            from_email=settings.EMAIL_HOST_USER,
+            recipient_list=[email],  # 👈 only one user
+            fail_silently=False,
+            )
     except Exception as exc:
         raise self.retry(exc=exc)
