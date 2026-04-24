@@ -36,7 +36,9 @@ from .views import (
 
     ContentAssignmentDetailView,
 
-    ContentHistory2APIView
+    ContentHistory2APIView,
+
+    ContentDeleteView, ContentFormDeleteView
 )
 
 urlpatterns = [
@@ -131,4 +133,7 @@ urlpatterns = [
          CommentEditDelete.as_view(), name="comment-edit"),
 
     path("contents/<uuid:content_id>/history2/", ContentHistory2APIView.as_view(), name="content-history"),
+
+    path("content/delete/", ContentDeleteView.as_view(), name="delete-content"),
+    path("content/form/delete/", ContentFormDeleteView.as_view(), name="delete-form")
 ]

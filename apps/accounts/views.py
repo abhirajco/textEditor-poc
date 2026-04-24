@@ -180,10 +180,10 @@ class LogoutView(APIView):
 @extend_schema(tags=['Users'])
 class ViewAllUsers(APIView):
     """Returns every user in the system. Admin only."""
-    # permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    # required_area = "users"
-    # required_role = "admin"
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area = "users"
+    required_role = "admin"
+    # permission_classes = [permissions.IsAuthenticated]
 
 
     def get(self, request):
@@ -205,11 +205,11 @@ class ViewAllUsers(APIView):
 @extend_schema(tags=['Users'])
 class PeopleWithoutRole(APIView):
     """Returns users who registered but haven't been assigned a role yet."""
-    # permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    # required_area = "users"
-    # required_role = "admin"
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area = "users"
+    required_role = "admin"
 
-    permission_classes = [permissions.IsAuthenticated]
+    # permission_classes = [permissions.IsAuthenticated]
 
 
     def get(self, request):

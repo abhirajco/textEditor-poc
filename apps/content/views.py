@@ -43,7 +43,7 @@ from utils.notifications.services import handle_mentions_and_notifications
 from utils.permissions.base import HasRBACPermission
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
-
+from rest_framework import status
 
 LOCK_WINDOW_SECONDS =  120
 
@@ -341,7 +341,7 @@ class SaveContentView(APIView):
             return Response({"error": str(e)}, status=500)
 
 
-# 4b. SUBMIT CONTENT VIEW (draft → preview; notifies internal members)
+# 4b. SUBMIT CONTENT VIEW AND NEW CONTENT (draft → preview; notifies internal members)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -573,6 +573,62 @@ class NewContentButton(APIView):
      except Exception as e:
             return Response({"error": str(e)}, status=500)
 
+
+
+@extend_schema(
+    tags=["Content"],
+    summary="Delete Content (via query param)",
+    description="Deletes content and its associated initiation form.",
+    parameters=[
+        OpenApiParameter(
+            name="content_id",
+            type=str,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="UUID of the content"
+        )
+    ]
+)
+class ContentDeleteView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["admin"]
+
+    def delete(self, request):
+        content_id = request.query_params.get("content_id")
+
+        if not content_id:
+            return Response(
+                {"error": "content_id is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        content = get_object_or_404(Content, content_id=content_id)
+
+        # safety checks
+        if content.status == "published":
+            return Response(
+                {"error": "Published content cannot be deleted."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if content.locked_permanently:
+            return Response(
+                {"error": "Rejected content is permanently locked."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Delete linked form
+        initiation_form = getattr(content, "initiation_form", None)
+        if initiation_form:
+            initiation_form.delete()
+
+        content.delete()
+
+        return Response(
+            {"message": "Content and associated form deleted successfully."},
+            status=status.HTTP_200_OK
+        )
 ###see that if the tags are getting added in task
 # ─────────────────────────────────────────────────────────────────────────────
 # 4b. INITIATION FORM (executive)
@@ -846,6 +902,48 @@ class StartFromForm(APIView):
 
 
         
+
+@extend_schema(
+    tags=["Content"],
+    summary="Delete Content Initiation Form",
+    description="Deletes only the initiation form independently.",
+    parameters=[
+        OpenApiParameter(
+            name="form_id",
+            type=str,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="UUID of the form"
+        )
+    ]
+)
+class ContentFormDeleteView(APIView):
+    permission_classes = [HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["admin", "write"]
+
+    def delete(self, request):
+        form_id = request.query_params.get("form_id")
+
+        if not form_id:
+            return Response(
+                {"error": "form_id is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        form = get_object_or_404(ContentInitiationForm, form_id=form_id)
+
+        # If linked content exists, unlink it safely
+        if form.content:
+            form.content.initiation_form = None
+            form.content.save(update_fields=[])
+
+        form.delete()
+
+        return Response(
+            {"message": "Content initiation form deleted successfully."},
+            status=status.HTTP_200_OK
+        )
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. REVIEWER LIST
 # ─────────────────────────────────────────────────────────────────────────────
