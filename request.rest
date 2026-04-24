@@ -48,8 +48,8 @@ POST {{base}}/accounts/signup/
 Content-Type: application/json
 
 {
-  "email":     "newuser@example.com",
-  "full_name": "New User",
+  "email":     "writer3@example.com",
+  "full_name": "writer3",
   "password":  "Pass123!"
 }
 
@@ -58,8 +58,8 @@ POST {{base}}/accounts/verify-otp/
 Content-Type: application/json
 
 {
-  "email": "newuser@example.com",
-  "otp":   "123456"
+  "email": "writer3@example.com",
+  "otp":   "172883"
 }
 
 ### 1c. Login as Admin
@@ -147,7 +147,7 @@ Content-Type: application/json
 }
 
 ###
-POST {{base}}/accounts/users/assign/5e8ce970-acf9-4198-9892-677c879835e/
+POST {{base}}/accounts/users/assign/5e8ce970-4198-9892-677c879835/
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
  

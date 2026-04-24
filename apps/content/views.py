@@ -1115,6 +1115,8 @@ class ApproveContent(APIView):
 
                     if triple:
                         c.status= "approved"
+                    else:
+                        _notify_exec_admin_and_assignees(c)
 
                     c.save(update_fields=["internal_approval"])
 
@@ -1124,7 +1126,7 @@ class ApproveContent(APIView):
                         performed_by=user
                     )
 
-                    _notify_exec_admin_and_assignees(c)
+                    
 
                     return Response({"message": "Internal approval recorded"})
 

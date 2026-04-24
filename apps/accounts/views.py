@@ -180,9 +180,11 @@ class LogoutView(APIView):
 @extend_schema(tags=['Users'])
 class ViewAllUsers(APIView):
     """Returns every user in the system. Admin only."""
-    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area = "users"
-    required_role = "admin"
+    # permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    # required_area = "users"
+    # required_role = "admin"
+    permission_classes = [permissions.IsAuthenticated]
+
 
     def get(self, request):
         users = User.objects.all().order_by('-date_joined')
@@ -203,9 +205,12 @@ class ViewAllUsers(APIView):
 @extend_schema(tags=['Users'])
 class PeopleWithoutRole(APIView):
     """Returns users who registered but haven't been assigned a role yet."""
-    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area = "users"
-    required_role = "admin"
+    # permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    # required_area = "users"
+    # required_role = "admin"
+
+    permission_classes = [permissions.IsAuthenticated]
+
 
     def get(self, request):
         users = User.objects.filter(role='none').order_by('-date_joined')
@@ -365,6 +370,24 @@ class PeopleWithoutRole(APIView):
 #         except User.DoesNotExist:
 #             return Response({"error": "User not found."}, status=404)
 
+
+
+@extend_schema(
+    tags=['Users'],
+    request=inline_serializer(
+        name='AssignRoleRequest',
+        fields={
+            'group': drf_serializers.ChoiceField(
+                choices=['admin', 'executive', 'internal', 'external', 'user'],
+                help_text='Organisational group for the user',
+            ),
+            'role': drf_serializers.ChoiceField(
+                choices=['admin', 'exec_approver', 'executive', 'writer', 'reviewer', 'sme', 'none'],
+                help_text='Specific role within the group',
+            ),
+        }
+    )
+)
 class AssignRole(APIView):
     """
     Admin assigns group + role to a user, syncs Django Group, and rebuilds the
@@ -452,7 +475,12 @@ class AssignRole(APIView):
  
                     # Sync Django Group
                     try:
-                        django_group_name = new_group.capitalize()
+                        # Internal group is split by role to avoid RBAC collision
+                        # between writers and reviewers who share the same group
+                        if new_group == 'internal':
+                            django_group_name = f"Internal_{new_role.capitalize()}"
+                        else:
+                            django_group_name = new_group.capitalize()
                         django_group, _ = Group.objects.get_or_create(name=django_group_name)
                         user.groups.clear()
                         user.groups.add(django_group)
@@ -492,11 +520,17 @@ class AssignRole(APIView):
         """
         Wipe and rebuild RBAC rules.
  
+        Django Group naming:
+            - internal writers  → "Internal_Writer"  (separate group to avoid RBAC collision)
+            - internal reviewer → "Internal_Reviewer" (separate group to avoid RBAC collision)
+            - all others        → group.capitalize()  e.g. "Admin", "Executive", "External"
+ 
+        Permissions:
         Admin      → admin action on ALL areas (content + board + users + reports + settings)
         Executive  → content: read + approve + initiate  |  board: read + write + update
         Internal   → depends on role:
                      writer   → content: read + write + update + approve  |  board: read + write + update
-                     reviewer → content: read + update + approve  |  board: read + write + update
+                     reviewer → content: read + update + approve          |  board: read + write + update
         External   → SME only: content: read (no board access)
         """
         try:
@@ -527,8 +561,7 @@ class AssignRole(APIView):
                         application_action=action
                     )
  
-            elif group == 'internal':
-                if role == 'writer':
+            elif group == 'internal' and role == 'writer':
                     # Insight
                     for action in ['read', 'write', 'update', 'approve']:
                         RBAC.objects.create(
@@ -544,7 +577,8 @@ class AssignRole(APIView):
                             application_action=action
                         )
  
-                elif role == 'reviewer':
+            elif group == 'internal' and role == 'reviewer':
+                    # Insight
                     # Insight
                     for action in ['read', 'update', 'approve']:
                         RBAC.objects.create(
@@ -560,6 +594,8 @@ class AssignRole(APIView):
                             application_action=action
                         )
  
+ 
+ 
             elif group == 'external' and role == 'sme':
                 # SMEs only get Insight content access — no board access
                 RBAC.objects.create(
@@ -568,9 +604,232 @@ class AssignRole(APIView):
                     application_action='read'
                 )
  
+            else:
+                # Catch-all: no rule matched — log exactly what came in
+                logger.error(
+                    f"_setup_rbac: No RBAC rule matched for group='{group}', role='{role}'. "
+                    f"Django group='{django_group.name}'. No permissions were assigned."
+                )
+                raise ValueError(
+                    f"No RBAC rule defined for group='{group}', role='{role}'. "
+                    f"Ensure the role sent matches a defined combination."
+                )
+ 
         except Exception as e:
             logger.error(f"Error in _setup_rbac: {e}")
             raise
+
+
+# class AssignRole(APIView):
+#     """
+#     Admin assigns group + role to a user, syncs Django Group, and rebuilds the
+#     RBAC matrix. Handles roles for both Insight (content) and Kanban (board).
+#     """
+
+#     permission_classes = [permissions.IsAuthenticated]
+
+#     # permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+#     # required_area = "users"
+#     # required_role = "admin"
+ 
+#     def post(self, request, user_id):
+#         """Assign group and role to user with comprehensive error handling."""
+#         try:
+#             # Validate UUID format (double-check, though URL converter should catch it)
+#             try:
+#                 user_uuid = uuid.UUID(str(user_id))
+#             except (ValueError, TypeError, AttributeError):
+#                 logger.warning(f"Invalid UUID format: {user_id}")
+#                 return Response(
+#                     {"error": "Invalid user ID format. Expected valid UUID."}, 
+#                     status=400
+#                 )
+ 
+#             # Validate request data
+#             new_group = request.data.get('group', '').lower().strip()
+#             new_role = request.data.get('role', 'none').lower().strip()
+ 
+#             if not new_group or not new_role:
+#                 return Response(
+#                     {"error": "Both 'group' and 'role' fields are required."}, 
+#                     status=400
+#                 )
+ 
+#             # Get valid choices from User model
+#             try:
+#                 valid_groups = [c[0] for c in User.GROUP_CHOICES]
+#                 valid_roles = [c[0] for c in User.ROLE_CHOICES]
+#             except (AttributeError, TypeError) as e:
+#                 logger.error(f"Error accessing User model choices: {e}")
+#                 return Response(
+#                     {"error": "Server configuration error."}, 
+#                     status=500
+#                 )
+ 
+#             # Validate group and role against allowed choices
+#             if new_group not in valid_groups:
+#                 return Response(
+#                     {"error": f"Invalid group '{new_group}'. Allowed: {', '.join(valid_groups)}"}, 
+#                     status=400
+#                 )
+            
+#             if new_role not in valid_roles:
+#                 return Response(
+#                     {"error": f"Invalid role '{new_role}'. Allowed: {', '.join(valid_roles)}"}, 
+#                     status=400
+#                 )
+ 
+#             # Atomic transaction for consistency
+#             try:
+#                 with transaction.atomic():
+#                     # Get user or raise 404
+#                     try:
+#                         user = User.objects.get(user_id=user_uuid)
+#                     except User.DoesNotExist:
+#                         logger.warning(f"User not found: {user_uuid}")
+#                         return Response(
+#                             {"error": "User not found."}, 
+#                             status=404
+#                         )
+ 
+#                     # Update user fields
+#                     user.group = new_group
+#                     user.role = new_role
+ 
+#                     # Set staff/superuser flags for admin group
+#                     if new_group == 'admin':
+#                         user.is_staff = True
+#                         user.is_superuser = True
+#                     else:
+#                         # Revoke admin privileges if demoting from admin
+#                         user.is_staff = False
+#                         user.is_superuser = False
+ 
+#                     user.save()
+ 
+#                     # Sync Django Group
+#                     try:
+#                         django_group_name = new_group.capitalize()
+#                         django_group, _ = Group.objects.get_or_create(name=django_group_name)
+#                         user.groups.clear()
+#                         user.groups.add(django_group)
+#                     except Exception as e:
+#                         logger.error(f"Error syncing Django groups: {e}")
+#                         raise
+ 
+#                     # Rebuild RBAC for this group
+#                     try:
+#                         self._setup_rbac(django_group, new_group, new_role)
+#                     except Exception as e:
+#                         logger.error(f"Error setting up RBAC: {e}")
+#                         raise
+ 
+#                 return Response({
+#                     "message": f"Updated {user.email} → group={new_group}, role={new_role}. RBAC synced.",
+#                     "user_id": str(user.user_id),
+#                     "group": new_group,
+#                     "role": new_role
+#                 }, status=200)
+ 
+#             except transaction.TransactionManagementError as e:
+#                 logger.error(f"Transaction error: {e}")
+#                 return Response(
+#                     {"error": "Database transaction failed. Please try again."}, 
+#                     status=500
+#                 )
+ 
+#         except Exception as e:
+#             logger.exception(f"Unexpected error in AssignRole: {e}")
+#             return Response(
+#                 {"error": "An unexpected error occurred. Please contact support."}, 
+#                 status=500
+#             )
+ 
+#     def _setup_rbac(self, django_group, group, role):
+#         """
+#         Wipe and rebuild RBAC rules.
+ 
+#         Admin      → admin action on ALL areas (content + board + users + reports + settings)
+#         Executive  → content: read + approve + initiate  |  board: read + write + update
+#         Internal   → depends on role:
+#                      writer   → content: read + write + update + approve  |  board: read + write + update
+#                      reviewer → content: read + update + approve  |  board: read + write + update
+#         External   → SME only: content: read (no board access)
+#         """
+#         try:
+#             # Delete existing RBAC rules for this group
+#             RBAC.objects.filter(application_group=django_group).delete()
+ 
+#             if group == 'admin':
+#                 for area in ['content', 'board', 'users', 'reports', 'settings']:
+#                     RBAC.objects.create(
+#                         application_group=django_group,
+#                         application_area=area,
+#                         application_action='admin'
+#                     )
+ 
+#             elif group == 'executive':
+#                 # Insight content access
+#                 for action in ['read', 'approve', 'initiate']:
+#                     RBAC.objects.create(
+#                         application_group=django_group,
+#                         application_area='content',
+#                         application_action=action
+#                     )
+#                 # Kanban board access
+#                 for action in ['read', 'write', 'update']:
+#                     RBAC.objects.create(
+#                         application_group=django_group,
+#                         application_area='board',
+#                         application_action=action
+#                     )
+ 
+#             elif role == 'writer':
+#                     # Insight
+#                     for action in ['read', 'write', 'update', 'approve']:
+#                         RBAC.objects.create(
+#                             application_group=django_group,
+#                             application_area='content',
+#                             application_action=action
+#                         )
+#                     # Kanban
+#                     for action in ['read', 'write', 'update']:
+#                         RBAC.objects.create(
+#                             application_group=django_group,
+#                             application_area='board',
+#                             application_action=action
+#                         )
+
+#             elif role == 'reviewer':
+#                     # Insight
+#                     # Insight
+#                     for action in ['read', 'update', 'approve']:
+#                         RBAC.objects.create(
+#                             application_group=django_group,
+#                             application_area='content',
+#                             application_action=action
+#                         )
+#                     # Kanban
+#                     for action in ['read', 'write', 'update']:
+#                         RBAC.objects.create(
+#                             application_group=django_group,
+#                             application_area='board',
+#                             application_action=action
+#                         )
+ 
+
+ 
+#             elif group == 'external' and role == 'sme':
+#                 # SMEs only get Insight content access — no board access
+#                 RBAC.objects.create(
+#                     application_group=django_group,
+#                     application_area='content',
+#                     application_action='read'
+#                 )
+ 
+#         except Exception as e:
+#             logger.error(f"Error in _setup_rbac: {e}")
+#             raise
  
  
 @extend_schema(tags=['Users'])
@@ -634,21 +893,24 @@ class DeleteUser(APIView):
 
 
 
+
 @extend_schema(tags=['Users'])
 class AdminUserRBACListView(APIView):
     """Returns every user with their full RBAC permissions. Admin only."""
     permission_classes = [HasRBACPermission]
     required_area = "users"
     required_role = "admin"
-
+ 
     def get(self, request):
         try:
             user_list = []
             for user in User.objects.all():
+                # Query via the user's actual assigned Django groups
+                # (not user.group string, which won't match Internal_Writer / Internal_Reviewer)
                 actions = RBAC.objects.filter(
-                    application_group__name__iexact=user.group
+                    application_group__in=user.groups.all()
                 ).values('application_area', 'application_action')
-
+ 
                 user_list.append({
                     'id':user.user_id,
                     'full_name': user.full_name,
@@ -657,11 +919,46 @@ class AdminUserRBACListView(APIView):
                     'role': user.role,
                     'permissions': list(actions),
                 })
-
+ 
             return Response({"count": len(user_list), "users": user_list})
-
+ 
         except Exception as e:
             return Response({"error": str(e)})
+ 
+ 
+
+
+# class AdminUserRBACListView(APIView):
+#     """Returns every user with their full RBAC permissions. Admin only."""
+#     # permission_classes = [HasRBACPermission]
+#     # required_area = "users"
+#     # required_role = "admin"
+
+
+#     permission_classes = [permissions.IsAuthenticated]
+
+
+#     def get(self, request):
+#         try:
+#             user_list = []
+#             for user in User.objects.all():
+#                 actions = RBAC.objects.filter(
+#                     application_group__name__iexact=user.group
+#                 ).values('application_area', 'application_action')
+
+#                 user_list.append({
+#                     'id':user.user_id,
+#                     'full_name': user.full_name,
+#                     'email': user.email,
+#                     'group': user.group,
+#                     'role': user.role,
+#                     'permissions': list(actions),
+#                 })
+
+#             return Response({"count": len(user_list), "users": user_list})
+
+#         except Exception as e:
+#             return Response({"error": str(e)})
 
 
 # ==============================================================================
