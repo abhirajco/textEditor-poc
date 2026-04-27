@@ -545,7 +545,7 @@ class NewContentButton(APIView):
                     performed_by = request.user,
                     detail       = f"Task created via content popup for '{title}'.",
                 )
-                content = Content.objects.create(
+                content = Content(
                     title  = title,
                     body = brief,
                     author= request.user,
@@ -556,6 +556,15 @@ class NewContentButton(APIView):
                     event = event,
                     task  = task,
                 )
+
+                content._version_data = {
+                    "title": title,
+                    "body": brief,
+                    "image_url": None,
+                    "changed_by_id": str(request.user.user_id),
+                }
+
+                content.save()
                 ContentHistory.objects.create(
                     content=content, action_type="initiated", performed_by=request.user
                 )
@@ -835,6 +844,7 @@ class StartFromForm(APIView):
             with transaction.atomic():
                 task = Task.objects.create(
                     title       = title,
+                    description= brief,
                     campaign    = campaign,
                     event       = event,
                     assigned_to  = request.user,
@@ -920,7 +930,7 @@ class StartFromForm(APIView):
 class ContentFormDeleteView(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["admin", "write"]
+    required_roles = ["admin"]
 
     def delete(self, request):
         form_id = request.query_params.get("form_id")

@@ -21,7 +21,7 @@ class HasRBACPermission(permissions.BasePermission):
         # if request.user.group == 'admin':
         #     return True
 
-        area        = getattr(view, 'required_area',  None)
+        area = getattr(view, 'required_area',  None)
         single_role = getattr(view, 'required_role',  None)
         multi_roles = getattr(view, 'required_roles', [])
 
