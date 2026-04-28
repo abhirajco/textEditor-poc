@@ -44,6 +44,10 @@ from utils.permissions.base import HasRBACPermission
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+import uuid
+import logging
+ 
+logger = logging.getLogger(__name__)
 
 LOCK_WINDOW_SECONDS =  120
 
@@ -486,6 +490,7 @@ class SubmitContentView(APIView):
             "brief":  drf_serializers.CharField(),
             "content_type": drf_serializers.CharField(),
             "campaign_id": drf_serializers.CharField(),
+            "executive_id": drf_serializers.CharField(),
             "tags":drf_serializers.CharField(required=False, allow_blank=True),
             "event_id": drf_serializers.CharField(required=False, allow_blank=True, allow_null=True),
         }
@@ -971,30 +976,6 @@ class ReviewerListView(APIView):
             for u in internal
         ])
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. NOTIFY CANDIDATES
-# ─────────────────────────────────────────────────────────────────────────────
-
-@extend_schema(tags=["Content"])
-class NotifyCandidatesView(APIView):
-    permission_classes = [HasRBACPermission]
-    required_area  = "content"
-    required_roles = ["write", "initiate" , "admin"]
-
-    def post(self, request, content_id):
-        notify_ids = request.data.get("notify_user_ids", [])
-        if not notify_ids:
-            return Response({"error": "notify_user_ids required."}, status=400)
-        try:
-            c = Content.objects.get(content_id=content_id)
-            from content.tasks import send_approval_email_task
-            send_approval_email_task.delay(
-                [str(uid) for uid in notify_ids], str(c.content_id), "in_review"
-            )
-            return Response({"message": "Notifications sent."})
-        except Content.DoesNotExist:
-            return Response({"error": "Content not found."}, status=404)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1564,6 +1545,14 @@ class WriteComment(APIView):
         if not text:
             return Response({"error": "comment_text is required."}, status=400)
         try:
+            try:
+                user_uuid = uuid.UUID(str(content_id))
+            except (ValueError, TypeError, AttributeError):
+                logger.warning(f"Invalid UUID format: {user_id}")
+                return Response(
+                    {"error": "Invalid user ID format. Expected valid UUID."}, 
+                    status=400
+                )
             with transaction.atomic():
                 c = Content.objects.select_for_update().get(content_id=content_id)
 
@@ -1636,7 +1625,7 @@ class WriteComment(APIView):
 class ResolveComment(APIView):
     permission_classes = [HasRBACPermission]
     required_area  = "content"
-    required_roles = ["updare", "admin"]
+    required_roles = ["update", "admin"]
 
     def patch(self, request, comment_id):
         try:

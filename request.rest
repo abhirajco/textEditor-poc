@@ -603,10 +603,10 @@ Content-Type: application/json
 "title": "AI Marketing Strategy from new content 2",
 "brief": "Create a detailed blog on how AI is transforming digital marketing in 2026.",
 "content_type": "blog",
-"campaign_id": "70d98ae1-25fc-4fe6-b519-ac5469f44eda",
+"campaign_id": "71da0acf-a49a-4d92-86b7-9afe406ee0f0",
 //"event_id": "REPLACE_WITH_EVENT_UUID",
 "tags": "ai,marketing,2026",
-"executive_id": "a407660f-324d-4a3b-93cf-68880d6d2f80"
+"executive_id": "acaa61fa-c2c3-4a11-8b05-814bfa1247ab"
 }
 
 

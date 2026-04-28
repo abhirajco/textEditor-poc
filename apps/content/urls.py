@@ -11,7 +11,7 @@ from .views import (
     NewContentButton,
     SaveContentView, SubmitContentView,
     InitiateContentView,
-    ReviewerListView, NotifyCandidatesView,
+    ReviewerListView,
     AssignSMEndExeView, ApproveContent,
 
     RejectContentView,PublishContentView,
@@ -95,9 +95,6 @@ urlpatterns = [
     path("contents/<uuid:content_id>/",      ContentDetailView.as_view(), name="content-detail"),
     path("contents/<uuid:content_id>/lock/", ContentLock.as_view(),       name="content-lock"),
 
-    # ── Notify candidates ─────────────────────────────────────────────────────
-    path("contents/<uuid:content_id>/notify-candidates/",
-         NotifyCandidatesView.as_view(), name="notify-candidates"),
 
     # ── Workflow ──────────────────────────────────────────────────────────────
     path("contents/<uuid:content_id>/assign-sme/", AssignSMEndExeView.as_view(), name="assign-sme"),
@@ -123,7 +120,7 @@ urlpatterns = [
          LatestVersionView.as_view(), name="content-latest-version"),
 
     # ── Comments ──────────────────────────────────────────────────────────────
-    path("contents/<uuid:content_id>/comment/",
+    path("contents/<str:content_id>/comment/",
          WriteComment.as_view(), name="content-comment"),
     path("contents/<uuid:content_id>/comments/history/",
          ContentCommentHistoryView.as_view(), name="content-comments"),
