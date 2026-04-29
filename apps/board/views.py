@@ -22,6 +22,7 @@ from drf_spectacular.utils import (extend_schema, OpenApiParameter, OpenApiTypes
     )
 from rest_framework import serializers as drf_serializers
 from django.core.serializers.json import DjangoJSONEncoder
+# from rest_framework.generics import RetrieveUpdateDestroyAPIView
 
 TASK_LIST_CACHE_KEY = "kanban_all_tasks"
 CACHE_TTL = 60 * 5
@@ -70,6 +71,7 @@ class CampaignListView(APIView):
         return Response(CampaignSerializer(campaign).data, status=201)
 
 
+@extend_schema(tags=["Campaign"])
 @extend_schema_view(
     get=extend_schema(
         summary="Get campaign details",
@@ -205,7 +207,7 @@ class CampaignDetailView(APIView):
     """GET / PATCH / DELETE a single campaign."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
     required_area  = "content"
-    required_roles = ["read", "write", "update", "admin"]
+    required_roles = [ "write", "update", "admin"]
 
     def _get(self, campaign_id):
         try:
@@ -214,10 +216,13 @@ class CampaignDetailView(APIView):
             return None
 
     def get(self, request, campaign_id):
-        c = self._get(campaign_id)
-        if not c:
-            return Response({"error": "Campaign not found."}, status=404)
-        return Response(CampaignSerializer(c).data)
+        try:
+            c = self._get(campaign_id)
+            if not c:
+                return Response({"error": "Campaign not found."}, status=404)
+            return Response(CampaignSerializer(c).data)
+        except Exception as e:
+            return Response({"error: " , str(e)})
 
     def patch(self, request, campaign_id):
      try: 
