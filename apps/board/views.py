@@ -36,39 +36,94 @@ def _bust_task_cache():
 # CAMPAIGN VIEWS
 # ==============================================================================
 
-@extend_schema(tags=["Campaign"])
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
+from rest_framework import status
+
+@extend_schema(
+    tags=["Campaign"],
+    summary="List and create campaigns",
+    description="GET: Retrieve all campaigns. POST: Create a new campaign.",
+    responses={
+        200: CampaignSerializer(many=True),
+        201: CampaignSerializer,
+        400: OpenApiResponse(description="Bad request"),
+        401: OpenApiResponse(description="Unauthorized"),
+        403: OpenApiResponse(description="Forbidden"),
+    },
+)
 class CampaignListView(APIView):
-    """GET all campaigns / POST create campaign."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area  = "content"
+    required_area = "content"
     required_roles = ["read", "write", "update", "admin"]
 
+    @extend_schema(
+        summary="Get all campaigns",
+        description="Returns a list of all campaigns.",
+        responses={200: CampaignSerializer(many=True)},
+    )
     def get(self, request):
-        campaigns  = Campaign.objects.select_related("created_by").all()
+        campaigns = Campaign.objects.select_related("created_by").all()
         serializer = CampaignSerializer(campaigns, many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary="Create a campaign",
+        description="Creates a new campaign with title, optional description, and date range.",
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "example": "Summer Campaign"},
+                    "description": {"type": "string", "example": "Campaign for summer promotions"},
+                    "start_date": {"type": "string", "format": "date", "example": "2026-05-01"},
+                    "end_date": {"type": "string", "format": "date", "example": "2026-06-01"},
+                    "max_hierarchy_level": {"type": "integer", "example": 2},
+                },
+                "required": ["title"],
+            }
+        },
+        responses={
+            201: CampaignSerializer,
+            400: OpenApiResponse(description="Validation error"),
+        },
+        examples=[
+            OpenApiExample(
+                "Create Campaign Example",
+                value={
+                    "title": "Summer Campaign",
+                    "description": "Campaign for summer promotions",
+                    "start_date": "2026-05-01",
+                    "end_date": "2026-06-01",
+                    "max_hierarchy_level": 2,
+                },
+                request_only=True,
+            )
+        ],
+    )
     def post(self, request):
-        title  = request.data.get("title", "").strip()
+        title = request.data.get("title", "").strip()
         description = request.data.get("description", "").strip()
-        start_date =request.data.get("start_date")
+        start_date = request.data.get("start_date")
         end_date = request.data.get("end_date")
         max_hierarchy_level = int(request.data.get("max_hierarchy_level", 2))
 
         if not title:
             return Response({"error": "title is required."}, status=400)
+        if not description:
+            return Response({"error": "description is required."}, status=400)
         if max_hierarchy_level < 1:
             return Response({"error": "max_hierarchy_level must be at least 1."}, status=400)
 
         campaign = Campaign.objects.create(
-            title  = title,
-            description = description,
-            start_date = start_date or None,
-            end_date= end_date   or None,
-            created_by = request.user,
-            max_hierarchy_level = max_hierarchy_level,
+            title=title,
+            description=description,
+            start_date=start_date or None,
+            end_date=end_date or None,
+            created_by=request.user,
+            max_hierarchy_level=max_hierarchy_level,
         )
         return Response(CampaignSerializer(campaign).data, status=201)
+
 
 
 @extend_schema(tags=["Campaign"])
