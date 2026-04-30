@@ -4,14 +4,16 @@ from .models import Campaign, Event, Task, TaskHistory, Discussion
 
 class CampaignSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source="created_by.full_name", read_only=True)
-    event_count= serializers.SerializerMethodField()
-    task_count= serializers.SerializerMethodField()
+    event_count = serializers.SerializerMethodField()
+    task_count = serializers.SerializerMethodField()
 
     class Meta:
-        model  = Campaign
+        model = Campaign
         fields = [
             "campaign_id", "title", "description",
             "start_date", "end_date",
+            "campaign_type", "priority", "status", "location",
+            "tags",
             "max_hierarchy_level",
             "created_by", "created_by_name",
             "event_count", "task_count",
@@ -24,7 +26,6 @@ class CampaignSerializer(serializers.ModelSerializer):
 
     def get_task_count(self, obj):
         return obj.tasks.count()
-
 
 class EventSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source="created_by.full_name", read_only=True)

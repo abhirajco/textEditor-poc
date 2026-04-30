@@ -1,11 +1,11 @@
 from django.urls import path
 from .views import (
-    CampaignListView, CampaignDetailView, CampaignEventsView, CampaignTasksView,
+    CampaignListView, CampaignDetailView, CampaignEventsView, CampaignTasksView,CampaignFilterSearchView,
     EventListView, EventDetailView, EventTasksView,
     TaskListView, TaskDetailView, TaskSubtasksView, TaskUpdateView,
     TransferTaskView, TaskFilterSearchView,
     MyTasksView, TasksByUserView,
-    DiscussionView, DiscussionDeleteView,
+    DiscussionView, DiscussionDeleteView, 
 )
 
 urlpatterns = [
@@ -14,6 +14,8 @@ urlpatterns = [
     path("campaigns/<str:campaign_id>/", CampaignDetailView.as_view(), name="campaign_detail"),
     path("campaigns/<str:campaign_id>/events/", CampaignEventsView.as_view(), name="campaign_events"),
     path("campaigns/<str:campaign_id>/tasks/", CampaignTasksView.as_view(),  name="campaign_tasks"),
+    path("campaigns/filter/", CampaignFilterSearchView.as_view(), name="campaign-filter-search"),
+
 
     # ── Events ────────────────────────────────────────────────────────────────
     path("events/", EventListView.as_view(), name="event_list"),

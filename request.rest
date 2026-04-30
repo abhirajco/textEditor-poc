@@ -1096,6 +1096,54 @@ Authorization: Bearer {{writerToken}}
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 1. Search + Status + Priority + Location + Start Date + Hierarchy
+GET http://localhost:8000/api/campaigns/?search=launch&status=planning&priority=high&location=mumbai&start_after=2026-01-01&max_hierarchy_level=2
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 2. Campaign Type + Status + Priority + End Date Range + Location + Hierarchy
+GET http://localhost:8000/api/campaigns/?campaign_type=marketing&status=in_progress&priority=medium&end_after=2026-03-01&end_before=2026-12-31&location=delhi&max_hierarchy_level=3
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 3. Search + Campaign Type + Created By + Start Date Range + Priority + Status
+GET http://localhost:8000/api/campaigns/?search=festival&campaign_type=event&created_by=USER_UUID&start_after=2026-04-01&start_before=2026-06-30&priority=low&status=upcoming
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 4. Location + Created By + Status + Priority + End Date + Hierarchy
+GET http://localhost:8000/api/campaigns/?location=bangalore&created_by=USER_UUID&status=planning&priority=high&end_before=2026-10-01&max_hierarchy_level=1
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 5. Search + Campaign Type + Location + Start + End Range + Priority
+GET http://localhost:8000/api/campaigns/?search=sale&campaign_type=retail&location=pune&start_after=2026-02-01&end_before=2026-08-31&priority=medium
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 6. Status + Priority + Created By + Full Date Window + Hierarchy
+GET http://localhost:8000/api/campaigns/?status=in_progress&priority=high&created_by=USER_UUID&start_after=2026-01-01&end_before=2026-12-31&max_hierarchy_level=2
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+
+
 ### ============================================================
 ### FULL HAPPY-PATH FLOW (copy & run in order)
 ### ============================================================

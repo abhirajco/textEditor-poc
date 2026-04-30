@@ -1548,7 +1548,7 @@ class WriteComment(APIView):
             try:
                 user_uuid = uuid.UUID(str(content_id))
             except (ValueError, TypeError, AttributeError):
-                logger.warning(f"Invalid UUID format: {user_id}")
+                logger.warning(f"Invalid UUID format: {content_id}")
                 return Response(
                     {"error": "Invalid user ID format. Expected valid UUID."}, 
                     status=400

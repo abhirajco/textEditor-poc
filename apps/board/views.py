@@ -159,28 +159,38 @@ class CampaignListView(APIView):
         summary="Update campaign (partial)",
         parameters=[
             OpenApiParameter(
-                name="campaign_id",
-                type=str,
-                location=OpenApiParameter.PATH,
-                description="Unique campaign ID"
+            name="campaign_id",
+            type=str,
+            location=OpenApiParameter.PATH,
+            description="Unique campaign ID"
             )
         ],
         request={
             "application/json": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "description": {"type": "string"},
-                    "start_date": {"type": "string", "format": "date"},
-                    "end_date": {"type": "string", "format": "date"},
-                    "max_hierarchy_level": {"type": "integer"}
+            "type": "object",
+            "properties": {
+                "title":               {"type": "string"},
+                "description":         {"type": "string"},
+                "start_date":          {"type": "string", "format": "date"},
+                "end_date":            {"type": "string", "format": "date"},
+                "campaign_type":       {"type": "string"},
+                "priority":            {"type": "string", "enum": ["low", "medium", "high"]},
+                "status":              {"type": "string", "enum": ["planning", "in_progress", "upcoming"]},
+                "location":            {"type": "string"},
+                "tags":                {"type": "string", "description": "Comma-separated tags e.g. design,ux,launch"},
+                "max_hierarchy_level": {"type": "integer"},
                 },
-                "example": {
-                    "title": "Updated Campaign",
-                    "description": "New description",
-                    "start_date": "2026-01-01",
-                    "end_date": "2026-12-31",
-                    "max_hierarchy_level": 3
+            "example": {
+                "title":               "Updated Campaign",
+                "description":         "New description",
+                "start_date":          "2026-01-01",
+                "end_date":            "2026-12-31",
+                "campaign_type":       "digital",
+                "priority":            "high",
+                "status":              "in_progress",
+                "location":            "Mumbai",
+                "tags":                "design,ux,launch",
+                "max_hierarchy_level": 3
                 }
             }
         },
@@ -281,14 +291,14 @@ class CampaignDetailView(APIView):
 
     def patch(self, request, campaign_id):
      try: 
-        print("hii")
+        # print("hii")
         c = self._get(campaign_id)
         if not c:
             return Response({"error": "Campaign not found."}, status=404)
         if request.user.role != "admin" and c.created_by != request.user:
             return Response({"error": "Only creator or admin can edit."}, status=403)
 
-        for field in ["title", "description", "start_date", "end_date", "max_hierarchy_level"]:
+        for field in ["title", "description", "start_date", "end_date", "max_hierarchy_level", "campaign_type", "priority", "status","location", "tags"]:
             if field in request.data:
                 setattr(c, field, request.data[field])
         c.save()
@@ -345,6 +355,95 @@ class CampaignTasksView(APIView):
         ).select_related("assigned_by", "assigned_to", "event")
         serializer = TaskListSerializer(tasks, many=True)
         return Response({"campaign": campaign.title, "tasks": serializer.data})
+
+
+
+
+@extend_schema(
+    tags=["Board"],
+    parameters=[
+        OpenApiParameter("search",              OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Search by title"),
+        OpenApiParameter("status",              OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["planning", "in_progress", "upcoming"]),
+        OpenApiParameter("priority",            OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["low", "medium", "high"]),
+        OpenApiParameter("campaign_type",       OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Filter by campaign type"),
+        OpenApiParameter("location",            OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Filter by location"),
+        OpenApiParameter("tags",                OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Filter by tag (comma-separated, matches any)"),
+        OpenApiParameter("created_by",          OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by creator user UUID"),
+        OpenApiParameter("start_after",         OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Campaigns starting on or after this date"),
+        OpenApiParameter("start_before",        OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Campaigns starting on or before this date"),
+        OpenApiParameter("end_after",           OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Campaigns ending on or after this date"),
+        OpenApiParameter("end_before",          OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Campaigns ending on or before this date"),
+        OpenApiParameter("max_hierarchy_level", OpenApiTypes.INT,  OpenApiParameter.QUERY, required=False, description="Filter by exact max hierarchy level"),
+    ]
+)
+class CampaignFilterSearchView(APIView):
+    """Filterable campaign list with date range, status, priority, tags, and hierarchy filters."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "write", "update", "admin"]
+
+    def get(self, request):
+        qs = Campaign.objects.select_related("created_by")
+
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(title__icontains=search)
+
+        status_param = request.query_params.get("status", "").strip()
+        if status_param:
+            if status_param not in [s[0] for s in Campaign.STATUS_CHOICES]:
+                return Response({"error": "Invalid status."}, status=400)
+            qs = qs.filter(status=status_param)
+
+        priority_param = request.query_params.get("priority", "").strip()
+        if priority_param:
+            if priority_param not in [p[0] for p in Campaign.PRIORITY_CHOICES]:
+                return Response({"error": "Invalid priority."}, status=400)
+            qs = qs.filter(priority=priority_param)
+
+        campaign_type = request.query_params.get("campaign_type", "").strip()
+        if campaign_type:
+            qs = qs.filter(campaign_type__icontains=campaign_type)
+
+        location = request.query_params.get("location", "").strip()
+        if location:
+            qs = qs.filter(location__icontains=location)
+
+        # Tags: support filtering by a single tag within comma-separated string
+        tag = request.query_params.get("tags", "").strip()
+        if tag:
+            qs = qs.filter(tags__icontains=tag)
+
+        created_by = request.query_params.get("created_by", "").strip()
+        if created_by:
+            qs = qs.filter(created_by__user_id=created_by)
+
+        start_after = request.query_params.get("start_after", "").strip()
+        if start_after:
+            qs = qs.filter(start_date__gte=start_after)
+
+        start_before = request.query_params.get("start_before", "").strip()
+        if start_before:
+            qs = qs.filter(start_date__lte=start_before)
+
+        end_after = request.query_params.get("end_after", "").strip()
+        if end_after:
+            qs = qs.filter(end_date__gte=end_after)
+
+        end_before = request.query_params.get("end_before", "").strip()
+        if end_before:
+            qs = qs.filter(end_date__lte=end_before)
+
+        max_hierarchy_level = request.query_params.get("max_hierarchy_level", "").strip()
+        if max_hierarchy_level:
+            try:
+                qs = qs.filter(max_hierarchy_level=int(max_hierarchy_level))
+            except ValueError:
+                return Response({"error": "max_hierarchy_level must be an integer."}, status=400)
+
+        serializer = CampaignSerializer(qs, many=True)
+        return Response({"count": qs.count(), "results": serializer.data})
+
 
 
 # ==============================================================================

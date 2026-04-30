@@ -12,11 +12,30 @@ class Campaign(models.Model):
         2 = root tasks + 1 level of subtasks
         3 = root tasks + 2 levels of subtasks
     """
+
+    PRIORITY_CHOICES = [
+        ("low", "Low"),
+        ("medium","Medium"),
+        ("high", "High"),
+    ]
+    #Planning, In Progress, Upcoming
+    STATUS_CHOICES = [
+        ("planning", "Planning"),
+        ("in_progress", "In Progress"),
+        ("upcoming", "Upcoming"),
+    ]
+
     campaign_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    campaign_type = models.CharField(max_length=255)
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="medium")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="to_do", db_index=True)
+    location = models.CharField(max_length=255)
+    tags = models.CharField(max_length=500, blank=True, default="",
+            help_text="Comma-separated tags e.g. design,ux,launch")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
         related_name="campaigns_created",
@@ -65,73 +84,6 @@ class Event(models.Model):
     def __str__(self):
         return f"{self.title} [{self.campaign.title}]"
 
-
-# class Task(models.Model):
-#     """
-#     A board task.  Created automatically when an executive submits the
-#     Content Initiation Form.  The resulting task_id is written back to
-#     Content.task_id so the two records are linked.
-
-#     Fields intentionally nullable on creation (filled in later by PM / admin):
-#       assigned_to, due_date, estimated_hours
-#     """
-
-#     STATUS_CHOICES = [
-#         ("todo",        "To Do"),
-#         ("in_progress", "In Progress"),
-#         ("blocked",   "Blocked"),
-#         ("completed", "Completed"),
-#     ]
-
-#     PRIORITY_CHOICES = [
-#         ("low",    "Low"),
-#         ("medium", "Medium"),
-#         ("high",   "High"),
-#     ]
-
-#     task_id  = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-#     title = models.CharField(max_length=255, db_index=True)
-#     description = models.TextField(blank=True, default="")
-
-#     # mirrors Content fields so board context is self-contained
-#     content_type = models.CharField(max_length=100, blank=True, default="")
-#     campaign = models.ForeignKey(Campaign , on_delete=models.CASCADE, related_name="task")
-#     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="task", blank=True, null=True)
-
-#     status = models.CharField(max_length=30, choices=STATUS_CHOICES,default="todo",db_index=True)
-#     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="medium")
-
-#     # always known — the executive who triggered initiation
-#     assigned_by = models.ForeignKey(
-#         settings.AUTH_USER_MODEL,
-#         on_delete=models.SET_NULL,
-#         null=True,
-#         related_name='tasks_created',
-#     )
-
-#     # filled in later — nullable on creation
-#     assigned_to = models.ForeignKey(
-#         settings.AUTH_USER_MODEL,
-#         on_delete=models.SET_NULL,
-#         null=True, blank=True,
-#         related_name="assigned_tasks",
-#     )
-#     due_date = models.DateField(null=True, blank=True)
-#     estimated_hours =models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
-
-#     created_at =models.DateTimeField(auto_now_add=True)
-#     updated_at = models.DateTimeField(auto_now=True)
-
-#     class Meta:
-#         app_label = "board"
-#         ordering = ["-created_at"]
-#         indexes = [
-#             models.Index(fields=["campaign_id", "status"], name="board_campaign_status_idx"),
-#             models.Index(fields=["assigned_to",  "status"], name="board_assigned_status_idx"),
-#         ]
-
-#     def __str__(self):
-#         return f"{self.title} [{self.status}]"
 
 
 class Task(models.Model):
