@@ -106,6 +106,11 @@ class CampaignListView(APIView):
         start_date = request.data.get("start_date")
         end_date = request.data.get("end_date")
         max_hierarchy_level = int(request.data.get("max_hierarchy_level", 2))
+        campaign_type=request.data.get("campaign_type", "").strip()
+        priority= request.data.get("priority", "medium").strip()
+        status= request.data.get("status", "").strip()
+        location= request.data.get("location", "").strip()
+        tags= request.data.get("tags", "").strip()
 
         if not title:
             return Response({"error": "title is required."}, status=400)
@@ -121,6 +126,12 @@ class CampaignListView(APIView):
             end_date=end_date or None,
             created_by=request.user,
             max_hierarchy_level=max_hierarchy_level,
+            campaign_type=campaign_type,
+            priority=priority,
+            status=status,
+            location=location,
+            tags= tags,
+
         )
         return Response(CampaignSerializer(campaign).data, status=201)
 
@@ -450,188 +461,264 @@ class CampaignFilterSearchView(APIView):
 # EVENT VIEWS
 # ==============================================================================
 
+
 @extend_schema(tags=["Event"])
+@extend_schema_view(
+    get=extend_schema(
+        summary="List all events",
+        description="Returns all events across all campaigns.",
+        responses={200: EventSerializer(many=True)},
+    ),
+    post=extend_schema(
+        summary="Create an event",
+        description="Creates a new event under the specified campaign.",
+        request={
+            "application/json": {
+                "type": "object",
+                "required": ["title", "campaign_id"],
+                "properties": {
+                    "title":       {"type": "string", "example": "Product Launch"},
+                    "description": {"type": "string", "example": "Main launch event"},
+                    "campaign_id": {"type": "string", "format": "uuid", "example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"},
+                    "start_date":  {"type": "string", "format": "date", "example": "2026-06-01"},
+                    "end_date":    {"type": "string", "format": "date", "example": "2026-06-07"},
+                    "event_type":  {"type": "string", "example": "launch"},
+                    "priority":    {"type": "string", "enum": ["low", "medium", "high"], "example": "high"},
+                    "status":      {"type": "string", "enum": ["planning", "in_progress", "upcoming"], "example": "planning"},
+                    "location":    {"type": "string", "example": "Mumbai"},
+                    "tags":        {"type": "string", "example": "launch,digital,q2"},
+                },
+            }
+        },
+        responses={
+            201: EventSerializer,
+            400: OpenApiResponse(description="Validation error"),
+            404: OpenApiResponse(description="Campaign not found"),
+        },
+        examples=[
+            OpenApiExample(
+                "Create Event Example",
+                value={
+                    "title": "Product Launch",
+                    "description": "Main launch event",
+                    "campaign_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                    "start_date": "2026-06-01",
+                    "end_date": "2026-06-07",
+                    "event_type": "launch",
+                    "priority": "high",
+                    "status": "planning",
+                    "location": "Mumbai",
+                    "tags": "launch,digital,q2",
+                },
+                request_only=True,
+            )
+        ],
+    ),
+)
 class EventListView(APIView):
     """GET all events / POST create event."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-    required_area = "board"
+    required_area = "content"
     required_roles = ["read", "write", "update", "admin"]
-
+ 
     def get(self, request):
         events = Event.objects.select_related("campaign", "created_by").all()
         serializer = EventSerializer(events, many=True)
         return Response(serializer.data)
-
+ 
     def post(self, request):
-        title= request.data.get("title", "").strip()
+        title       = request.data.get("title", "").strip()
         description = request.data.get("description", "").strip()
         campaign_id = request.data.get("campaign_id")
         start_date  = request.data.get("start_date")
-        end_date = request.data.get("end_date")
-
+        end_date    = request.data.get("end_date")
+        event_type  = request.data.get("event_type", "").strip()
+        priority    = request.data.get("priority", "medium").strip()
+        status      = request.data.get("status", "").strip()
+        location    = request.data.get("location", "").strip()
+        tags        = request.data.get("tags", "").strip()
+ 
         if not title:
             return Response({"error": "title is required."}, status=400)
         if not campaign_id:
             return Response({"error": "campaign_id is required. Events must belong to a campaign."}, status=400)
-
+ 
         try:
             campaign = Campaign.objects.get(campaign_id=campaign_id)
         except Campaign.DoesNotExist:
             return Response({"error": "Campaign not found."}, status=404)
-
+ 
         event = Event.objects.create(
-            campaign= campaign,
-            title = title,
-            description = description,
+            campaign   = campaign,
+            title      = title,
+            description= description,
             start_date = start_date or None,
-            end_date= end_date   or None,
+            end_date   = end_date   or None,
+            event_type = event_type,
+            priority   = priority,
+            status     = status,
+            location   = location,
+            tags       = tags,
             created_by = request.user,
         )
         return Response(EventSerializer(event).data, status=201)
-
-
-
-
-@extend_schema(
-    tags=["Event"],
+ 
+ 
+ 
+ 
+@extend_schema(tags=["Event"])
+@extend_schema_view(
+    get=extend_schema(
+        summary="Get event details",
+        description="Retrieve a single event by its UUID.",
+        parameters=[
+            OpenApiParameter(
+                name="event_id", type=str, location=OpenApiParameter.PATH,
+                description="Unique event UUID",
+            )
+        ],
+        responses={
+            200: EventSerializer,
+            404: OpenApiResponse(
+                response={"type": "object", "properties": {"error": {"type": "string"}}},
+                description="Event not found",
+                examples=[OpenApiExample("Not Found", value={"error": "Event not found."})],
+            ),
+        },
+    ),
+    patch=extend_schema(
+        summary="Update event (partial)",
+        description="Partially update an event. Only the creator or an admin may edit.",
+        parameters=[
+            OpenApiParameter(
+                name="event_id", type=str, location=OpenApiParameter.PATH,
+                description="Unique event UUID",
+            )
+        ],
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "title":       {"type": "string"},
+                    "description": {"type": "string"},
+                    "start_date":  {"type": "string", "format": "date"},
+                    "end_date":    {"type": "string", "format": "date"},
+                    "event_type":  {"type": "string"},
+                    "priority":    {"type": "string", "enum": ["low", "medium", "high"]},
+                    "status":      {"type": "string", "enum": ["planning", "in_progress", "upcoming"]},
+                    "location":    {"type": "string"},
+                    "tags":        {"type": "string", "description": "Comma-separated tags e.g. design,ux,launch"},
+                },
+                "example": {
+                    "title":      "Updated Event",
+                    "description":"New description",
+                    "start_date": "2026-06-01",
+                    "end_date":   "2026-06-07",
+                    "event_type": "webinar",
+                    "priority":   "high",
+                    "status":     "in_progress",
+                    "location":   "Delhi",
+                    "tags":       "webinar,digital",
+                },
+            }
+        },
+        responses={
+            200: EventSerializer,
+            403: OpenApiResponse(
+                response={"type": "object", "properties": {"error": {"type": "string"}}},
+                examples=[OpenApiExample("Forbidden", value={"error": "Only creator or admin can edit."})],
+            ),
+            404: OpenApiResponse(
+                response={"type": "object", "properties": {"error": {"type": "string"}}},
+                examples=[OpenApiExample("Not Found", value={"error": "Event not found."})],
+            ),
+        },
+    ),
+    delete=extend_schema(
+        summary="Delete event",
+        description="Delete an event. Only the creator or an admin may delete.",
+        parameters=[
+            OpenApiParameter(
+                name="event_id", type=str, location=OpenApiParameter.PATH,
+                description="Unique event UUID",
+            )
+        ],
+        responses={
+            200: OpenApiResponse(
+                response={"type": "object", "properties": {"message": {"type": "string"}}},
+                examples=[OpenApiExample("Deleted", value={"message": "Event deleted."})],
+            ),
+            403: OpenApiResponse(
+                response={"type": "object", "properties": {"error": {"type": "string"}}},
+                examples=[OpenApiExample("Forbidden", value={"error": "Only creator or admin can delete."})],
+            ),
+            404: OpenApiResponse(
+                response={"type": "object", "properties": {"error": {"type": "string"}}},
+                examples=[OpenApiExample("Not Found", value={"error": "Event not found."})],
+            ),
+        },
+    ),
 )
 class EventDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
     required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
-
+ 
     def _get(self, event_id):
         try:
             return Event.objects.select_related("campaign", "created_by").get(event_id=event_id)
         except Event.DoesNotExist:
             return None
-
-    @extend_schema(
-        summary="Get event details",
-        description="Retrieve a single event by ID",
-        responses={
-            200: EventSerializer,
-            404: OpenApiResponse(description="Event not found"),
-        },
-    )
+ 
     def get(self, request, event_id):
         e = self._get(event_id)
         if not e:
             return Response({"error": "Event not found."}, status=404)
         return Response(EventSerializer(e).data)
-
-    @extend_schema(
-        summary="Update event",
-        description="Update event fields (only creator or admin allowed)",
-        request=EventSerializer,
-        responses={
-            200: EventSerializer,
-            403: OpenApiResponse(description="Forbidden"),
-            404: OpenApiResponse(description="Event not found"),
-        },
-        examples=[
-            OpenApiExample(
-                "Update Event Example",
-                value={
-                    "title": "Updated Event",
-                    "description": "New description",
-                    "start_date": "2026-04-20",
-                    "end_date": "2026-04-25"
-                },
-                request_only=True,
-            )
-        ]
-    )
+ 
     def patch(self, request, event_id):
         e = self._get(event_id)
         if not e:
             return Response({"error": "Event not found."}, status=404)
         if request.user.role != "admin" and e.created_by != request.user:
             return Response({"error": "Only creator or admin can edit."}, status=403)
-
-        for field in ["title", "description", "start_date", "end_date"]:
+ 
+        for field in [
+            "title", "description", "start_date", "end_date",
+            "event_type", "priority", "status", "location", "tags",
+        ]:
             if field in request.data:
                 setattr(e, field, request.data[field])
         e.save()
-
         return Response(EventSerializer(e).data)
-
-    @extend_schema(
-        summary="Delete event",
-        description="Delete an event (only creator or admin allowed)",
-        responses={
-            200: OpenApiResponse(description="Event deleted"),
-            403: OpenApiResponse(description="Forbidden"),
-            404: OpenApiResponse(description="Event not found"),
-        },
-    )
+ 
     def delete(self, request, event_id):
         e = self._get(event_id)
         if not e:
             return Response({"error": "Event not found."}, status=404)
         if request.user.role != "admin" and e.created_by != request.user:
             return Response({"error": "Only creator or admin can delete."}, status=403)
-
         e.delete()
         _bust_task_cache()
         return Response({"message": "Event deleted."})
-
-
-
-# class EventDetailView(APIView):
-#     """GET / PATCH / DELETE a single event."""
-#     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
-#     required_area  = "content"
-#     required_roles = ["read", "write", "update", "admin"]
-
-#     def _get(self, event_id):
-#         try:
-#             return Event.objects.select_related("campaign", "created_by").get(event_id=event_id)
-#         except Event.DoesNotExist:
-#             return None
-
-#     def get(self, request, event_id):
-#         e = self._get(event_id)
-#         if not e:
-#             return Response({"error": "Event not found."}, status=404)
-#         return Response(EventSerializer(e).data)
-
-#     def patch(self, request, event_id):
-#         e = self._get(event_id)
-#         if not e:
-#             return Response({"error": "Event not found."}, status=404)
-#         if request.user.role != "admin" and e.created_by != request.user:
-#             return Response({"error": "Only creator or admin can edit."}, status=403)
-#         for field in ["title", "description", "start_date", "end_date"]:
-#             if field in request.data:
-#                 setattr(e, field, request.data[field])
-#         e.save()
-#         return Response(EventSerializer(e).data)
-
-#     def delete(self, request, event_id):
-#         e = self._get(event_id)
-#         if not e:
-#             return Response({"error": "Event not found."}, status=404)
-#         if request.user.role != "admin" and e.created_by != request.user:
-#             return Response({"error": "Only creator or admin can delete."}, status=403)
-#         e.delete()
-#         _bust_task_cache()
-#         return Response({"message": "Event deleted."})
-
-
+ 
+ 
+ 
+ 
+ 
 @extend_schema(tags=["Event"])
 class EventTasksView(APIView):
     """GET all tasks under a specific event."""
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
     required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
-
+ 
     def get(self, request, event_id):
         try:
             event = Event.objects.select_related("campaign").get(event_id=event_id)
         except Event.DoesNotExist:
             return Response({"error": "Event not found."}, status=404)
-
+ 
         tasks = Task.objects.filter(
             event=event, parent_task__isnull=True
         ).select_related("assigned_by", "assigned_to")
@@ -641,12 +728,111 @@ class EventTasksView(APIView):
             "campaign": event.campaign.title,
             "tasks": serializer.data,
         })
+ 
+ 
 
+ 
+@extend_schema(
+    tags=["Event"],
+    summary="Filter and search events",
+    description=(
+        "Filterable event list. Supports full-text search on title and filtering by "
+        "status, priority, event_type, location, tags, campaign, creator, and date ranges."
+    ),
+    parameters=[
+        OpenApiParameter("search",       OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Search by title"),
+        OpenApiParameter("status",       OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["planning", "in_progress", "upcoming"]),
+        OpenApiParameter("priority",     OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["low", "medium", "high"]),
+        OpenApiParameter("event_type",   OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Filter by event type"),
+        OpenApiParameter("location",     OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Filter by location (partial match)"),
+        OpenApiParameter("tags",         OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Filter by tag (partial match)"),
+        OpenApiParameter("campaign_id",  OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by campaign UUID"),
+        OpenApiParameter("created_by",   OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by creator user UUID"),
+        OpenApiParameter("start_after",  OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Events starting on or after this date"),
+        OpenApiParameter("start_before", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Events starting on or before this date"),
+        OpenApiParameter("end_after",    OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Events ending on or after this date"),
+        OpenApiParameter("end_before",   OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Events ending on or before this date"),
+    ],
+    responses={
+        200: inline_serializer(
+            name="EventFilterResponse",
+            fields={
+                "count":   drf_serializers.IntegerField(),
+                "results": EventSerializer(many=True),
+            },
+        ),
+        400: OpenApiResponse(description="Invalid filter parameter"),
+    },
+)
+class EventFilterSearchView(APIView):
+    """Filterable event list with date range, status, priority, tags, and campaign filters."""
+    permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
+    required_area  = "content"
+    required_roles = ["read", "write", "update", "admin"]
+ 
+    def get(self, request):
+        qs = Event.objects.select_related("campaign", "created_by")
+ 
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(title__icontains=search)
+ 
+        status_param = request.query_params.get("status", "").strip()
+        if status_param:
+            if status_param not in [s[0] for s in Event.STATUS_CHOICES]:
+                return Response({"error": "Invalid status."}, status=400)
+            qs = qs.filter(status=status_param)
+ 
+        priority_param = request.query_params.get("priority", "").strip()
+        if priority_param:
+            if priority_param not in [p[0] for p in Event.PRIORITY_CHOICES]:
+                return Response({"error": "Invalid priority."}, status=400)
+            qs = qs.filter(priority=priority_param)
+ 
+        event_type = request.query_params.get("event_type", "").strip()
+        if event_type:
+            qs = qs.filter(event_type__icontains=event_type)
+ 
+        location = request.query_params.get("location", "").strip()
+        if location:
+            qs = qs.filter(location__icontains=location)
+ 
+        tag = request.query_params.get("tags", "").strip()
+        if tag:
+            qs = qs.filter(tags__icontains=tag)
+ 
+        campaign_id = request.query_params.get("campaign_id", "").strip()
+        if campaign_id:
+            qs = qs.filter(campaign__campaign_id=campaign_id)
+ 
+        created_by = request.query_params.get("created_by", "").strip()
+        if created_by:
+            qs = qs.filter(created_by__user_id=created_by)
+ 
+        start_after = request.query_params.get("start_after", "").strip()
+        if start_after:
+            qs = qs.filter(start_date__gte=start_after)
+ 
+        start_before = request.query_params.get("start_before", "").strip()
+        if start_before:
+            qs = qs.filter(start_date__lte=start_before)
+ 
+        end_after = request.query_params.get("end_after", "").strip()
+        if end_after:
+            qs = qs.filter(end_date__gte=end_after)
+ 
+        end_before = request.query_params.get("end_before", "").strip()
+        if end_before:
+            qs = qs.filter(end_date__lte=end_before)
+ 
+        serializer = EventSerializer(qs, many=True)
+        return Response({"count": qs.count(), "results": serializer.data})
+ 
+ 
 
 # ==============================================================================
 # TASK VIEWS
 # ==============================================================================
-
 @extend_schema(
     tags=["Board"],
     request=inline_serializer(
@@ -657,11 +843,14 @@ class EventTasksView(APIView):
             "campaign_id": drf_serializers.UUIDField(help_text="Required. UUID of the campaign."),
             "event_id": drf_serializers.UUIDField(required=False, help_text="Optional. UUID of the event."),
             "parent_task_id": drf_serializers.UUIDField(required=False, help_text="Optional. UUID of parent task for subtask creation."),
-            "assigned_to":drf_serializers.UUIDField(help_text="UUID of user to assign task to"),
+            "assigned_to": drf_serializers.UUIDField(help_text="UUID of user to assign task to"),
             "tags": drf_serializers.CharField(required=False),
-            "priority": drf_serializers.ChoiceField(choices=["low","medium","high"], required=False),
+            "priority": drf_serializers.ChoiceField(choices=["low", "medium", "high"], required=False),
             "marketing_type": drf_serializers.CharField(required=False),
             "due_date": drf_serializers.DateField(required=False),
+            "launch_date": drf_serializers.DateField(required=False),                          # new
+            "estimated_hours": drf_serializers.DateTimeField(required=False),                  # new
+            "completed_hours": drf_serializers.DateTimeField(required=False),                  # new
         }
     )
 )
@@ -672,31 +861,34 @@ class TaskListView(APIView):
     required_roles = ["read", "write", "update", "admin"]
 
     def get(self, request):
-      try:
-        cached = cache.get(TASK_LIST_CACHE_KEY)
-        if cached:
-            return Response(json.loads(cached))
-        tasks = Task.objects.select_related(
-            "assigned_by", "assigned_to", "last_transferred_by", "campaign", "event", "parent_task"
-        ).all()
-        serializer = TaskListSerializer(tasks, many=True)
-        data = serializer.data
-        cache.set(TASK_LIST_CACHE_KEY, json.dumps(data, cls=DjangoJSONEncoder), CACHE_TTL)
-        return Response(data)
-      except Exception as e:
-          return Response({"error": str(e)} , status=500)
+        try:
+            cached = cache.get(TASK_LIST_CACHE_KEY)
+            if cached:
+                return Response(json.loads(cached))
+            tasks = Task.objects.select_related(
+                "assigned_by", "assigned_to", "last_transferred_by", "campaign", "event", "parent_task"
+            ).all()
+            serializer = TaskListSerializer(tasks, many=True)
+            data = serializer.data
+            cache.set(TASK_LIST_CACHE_KEY, json.dumps(data, cls=DjangoJSONEncoder), CACHE_TTL)
+            return Response(data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
 
     def post(self, request):
         title = request.data.get("title", "").strip()
         description = request.data.get("description", "").strip()
-        campaign_id= request.data.get("campaign_id")
+        campaign_id = request.data.get("campaign_id")
         event_id = request.data.get("event_id")
         parent_task_id = request.data.get("parent_task_id")
         assigned_to_id = request.data.get("assigned_to")
-        tags= request.data.get("tags", "").strip()
-        priority= request.data.get("priority", "medium").strip()
+        tags = request.data.get("tags", "").strip()
+        priority = request.data.get("priority", "medium").strip()
         marketing_type = request.data.get("marketing_type", "").strip()
         due_date = request.data.get("due_date")
+        launch_date = request.data.get("launch_date")                  # new
+        estimated_hours = request.data.get("estimated_hours")          # new
+        completed_hours = request.data.get("completed_hours")          # new
 
         if not title:
             return Response({"error": "title is required."}, status=400)
@@ -732,37 +924,40 @@ class TaskListView(APIView):
         try:
             with transaction.atomic():
                 task = Task(
-                    title  = title,
-                    description = description,
-                    campaign = campaign,
-                    event= event,
-                    parent_task = parent_task,
-                    tags = tags,
-                    priority = priority,
-                    marketing_type = marketing_type,
-                    due_date = due_date or None,
-                    assigned_by = request.user,
-                    assigned_to = assignee,
-                    status = "to_do",
+                    title=title,
+                    description=description,
+                    campaign=campaign,
+                    event=event,
+                    parent_task=parent_task,
+                    tags=tags,
+                    priority=priority,
+                    marketing_type=marketing_type,
+                    due_date=due_date or None,
+                    launch_date=launch_date or None,                    # new
+                    estimated_hours=estimated_hours or None,            # new
+                    completed_hours=completed_hours or None,            # new
+                    assigned_by=request.user,
+                    assigned_to=assignee,
+                    status="to_do",
                 )
                 task.full_clean()  # runs clean() for hierarchy validation
                 task.save()
 
                 TaskHistory.objects.create(
-                    task = task,
-                    action  = "created",
-                    performed_by = request.user,
-                    detail = f"Task created and assigned to {assignee.full_name} ({assignee.email})",
+                    task=task,
+                    action="created",
+                    performed_by=request.user,
+                    detail=f"Task created and assigned to {assignee.full_name} ({assignee.email})",
                 )
         except ValidationError as e:
             return Response({"error": str(e)}, status=400)
 
         _bust_task_cache()
         send_task_assignment_email(
-            assignee_email = assignee.email,
-            assignee_name = assignee.full_name,
-            task_title = task.title,
-            assigned_by_name = request.user.full_name,
+            assignee_email=assignee.email,
+            assignee_name=assignee.full_name,
+            task_title=task.title,
+            assigned_by_name=request.user.full_name,
         )
         return Response(TaskSerializer(task).data, status=201)
 
@@ -774,7 +969,6 @@ class TaskDetailView(APIView):
     required_area  = "content"
     required_roles = ["read", "write", "update", "admin"]
 
-    #for queery optimisation
     def _get_task(self, task_id):
         try:
             return Task.objects.select_related(
@@ -814,13 +1008,13 @@ class TaskSubtasksView(APIView):
         except Task.DoesNotExist:
             return Response({"error": "Task not found."}, status=404)
 
-        subtasks   = Task.objects.filter(parent_task=task).select_related("assigned_by", "assigned_to")
+        subtasks = Task.objects.filter(parent_task=task).select_related("assigned_by", "assigned_to")
         serializer = TaskListSerializer(subtasks, many=True)
         return Response({
             "parent_task": task.title,
             "depth": task.get_depth(),
             "max_allowed_depth": task.campaign.max_hierarchy_level,
-            "subtasks":    serializer.data,
+            "subtasks": serializer.data,
         })
 
 
@@ -846,22 +1040,27 @@ class TaskUpdateView(APIView):
         if not can_edit:
             return Response({"error": "Only the task creator, last transferrer, or admin can edit."}, status=403)
 
-        editable = ["title", "description", "tags", "priority", "marketing_type", "due_date", "status"]
-        changed  = []
+        editable = [
+            "title", "description", "tags", "priority", "marketing_type",
+            "due_date", "launch_date",          # launch_date added
+            "estimated_hours", "completed_hours",  # new fields added
+            "status",
+        ]
+        changed = []
 
         for field in editable:
             if field not in request.data:
                 continue
             new_val = request.data[field]
             if field == "priority" and new_val not in [p[0] for p in Task.PRIORITY_CHOICES]:
-                return Response({"error": f"Invalid priority."}, status=400)
+                return Response({"error": "Invalid priority."}, status=400)
             if field == "status" and new_val not in [s[0] for s in Task.STATUS_CHOICES]:
-                return Response({"error": f"Invalid status."}, status=400)
-            if field == "due_date" and new_val:
+                return Response({"error": "Invalid status."}, status=400)
+            if field in ("due_date", "launch_date") and new_val:
                 try:
                     datetime.strptime(new_val, "%Y-%m-%d")
                 except ValueError:
-                    return Response({"error": "due_date must be YYYY-MM-DD."}, status=400)
+                    return Response({"error": f"{field} must be YYYY-MM-DD."}, status=400)
             if field == "title" and not str(new_val).strip():
                 return Response({"error": "Title cannot be empty."}, status=400)
 
@@ -910,21 +1109,21 @@ class TransferTaskView(APIView):
         old_assignee = task.assigned_to
         with transaction.atomic():
             task.last_transferred_by = request.user
-            task.assigned_to         = new_assignee
+            task.assigned_to = new_assignee
             task.save()
             TaskHistory.objects.create(
-                task = task,
-                action = "transferred",
-                performed_by = request.user,
-                detail = f"Transferred from {old_assignee.full_name} to {new_assignee.full_name}",
+                task=task,
+                action="transferred",
+                performed_by=request.user,
+                detail=f"Transferred from {old_assignee.full_name} to {new_assignee.full_name}",
             )
 
         _bust_task_cache()
         send_task_transfer_email(
-            new_assignee_email= new_assignee.email,
-            new_assignee_name = new_assignee.full_name,
-            task_title= task.title,
-            transferred_by_name = request.user.full_name,
+            new_assignee_email=new_assignee.email,
+            new_assignee_name=new_assignee.full_name,
+            task_title=task.title,
+            transferred_by_name=request.user.full_name,
         )
         return Response({"message": f"Transferred to {new_assignee.full_name}.", "task": TaskSerializer(task).data})
 
@@ -932,18 +1131,21 @@ class TransferTaskView(APIView):
 @extend_schema(
     tags=["Board"],
     parameters=[
-        OpenApiParameter("search", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("status", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["to_do","in_progress","completed","blocked"]),
-        OpenApiParameter("priority", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["low","medium","high"]),
+        OpenApiParameter("search", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["to_do", "in_progress", "completed", "in_review"]),
+        OpenApiParameter("priority", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["low", "medium", "high"]),
         OpenApiParameter("campaign_id", OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by campaign UUID"),
         OpenApiParameter("event_id", OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by event UUID"),
-        OpenApiParameter("assigned_to",OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by assigned user UUID"),
-        OpenApiParameter("marketing_type", OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("tags",OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("assigned_to", OpenApiTypes.UUID, OpenApiParameter.QUERY, required=False, description="Filter by assigned user UUID"),
+        OpenApiParameter("marketing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("tags", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
         OpenApiParameter("due_date", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False),
         OpenApiParameter("due_before", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False),
         OpenApiParameter("due_after", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False),
-        OpenApiParameter("root_only",OpenApiTypes.BOOL, OpenApiParameter.QUERY, required=False, description="If true, return only root tasks (no subtasks)"),
+        OpenApiParameter("launch_date", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Filter by exact launch date"),         # new
+        OpenApiParameter("launch_before", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Filter tasks launching before date"),  # new
+        OpenApiParameter("launch_after", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Filter tasks launching after date"),    # new
+        OpenApiParameter("root_only", OpenApiTypes.BOOL, OpenApiParameter.QUERY, required=False, description="If true, return only root tasks (no subtasks)"),
     ]
 )
 class TaskFilterSearchView(APIView):
@@ -1005,6 +1207,19 @@ class TaskFilterSearchView(APIView):
         if due_after:
             qs = qs.filter(due_date__gte=due_after)
 
+        # new: launch_date filters
+        launch_date = request.query_params.get("launch_date", "").strip()
+        if launch_date:
+            qs = qs.filter(launch_date=launch_date)
+
+        launch_before = request.query_params.get("launch_before", "").strip()
+        if launch_before:
+            qs = qs.filter(launch_date__lte=launch_before)
+
+        launch_after = request.query_params.get("launch_after", "").strip()
+        if launch_after:
+            qs = qs.filter(launch_date__gte=launch_after)
+
         root_only = request.query_params.get("root_only", "").lower()
         if root_only in ("true", "1", "yes"):
             qs = qs.filter(parent_task__isnull=True)
@@ -1013,8 +1228,7 @@ class TaskFilterSearchView(APIView):
         return Response({"count": qs.count(), "results": serializer.data})
 
 
-
-#2 apis below are not needed, filter thing wil do the work
+# 2 apis below are not needed, filter thing will do the work
 @extend_schema(tags=["Board"])
 class MyTasksView(APIView):
     permission_classes = [permissions.IsAuthenticated, HasRBACPermission]
@@ -1026,6 +1240,7 @@ class MyTasksView(APIView):
             "assigned_by", "assigned_to", "campaign", "event"
         )
         return Response(TaskListSerializer(tasks, many=True).data)
+
 
 
 @extend_schema(tags=["Board"])
@@ -1041,11 +1256,10 @@ class TasksByUserView(APIView):
             return Response({"error": "User not found."}, status=404)
         tasks = Task.objects.filter(assigned_to=target).select_related("assigned_by", "assigned_to", "campaign", "event")
         return Response({
-            "user":  {"user_id": str(target.user_id), "full_name": target.full_name},
+            "user": {"user_id": str(target.user_id), "full_name": target.full_name},
             "tasks": TaskListSerializer(tasks, many=True).data,
         })
-
-
+    
 # ==============================================================================
 # DISCUSSION
 # ==============================================================================

@@ -64,12 +64,31 @@ class Event(models.Model):
     A grouping of tasks within a Campaign.
     An Event cannot exist without a Campaign.
     """
+
+    PRIORITY_CHOICES = [
+        ("low", "Low"),
+        ("medium","Medium"),
+        ("high", "High"),
+    ]
+    #Planning, In Progress, Upcoming
+    STATUS_CHOICES = [
+        ("planning", "Planning"),
+        ("in_progress", "In Progress"),
+        ("upcoming", "Upcoming"),
+    ]
+
     event_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name="events")
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
+    event_type = models.CharField(max_length=255)
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="medium")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="to_do", db_index=True)
+    location = models.CharField(max_length=255)
+    tags = models.CharField(max_length=500, blank=True, default="",
+            help_text="Comma-separated tags e.g. design,ux,launch")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
         related_name="events_created",
@@ -101,7 +120,7 @@ class Task(models.Model):
         ("to_do", "To Do"),
         ("in_progress", "In Progress"),
         ("completed","Completed"),
-        ("blocked", "Blocked"),
+        ("in_review",  "In Review"),
     ]
 
     PRIORITY_CHOICES = [
@@ -133,8 +152,11 @@ class Task(models.Model):
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="medium")
     marketing_type = models.CharField(max_length=255, blank=True, default="")
     due_date = models.DateField(null=True, blank=True)
+    launch_date = models.DateField(null=True, blank=True)
+    estimated_hours = models.DurationField(null=True, blank=True)
+    completed_hours = models.DurationField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="to_do", db_index=True)
-
+    
     assigned_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
         related_name="tasks_created",
