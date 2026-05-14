@@ -371,7 +371,7 @@ class CampaignTasksView(APIView):
 
 
 @extend_schema(
-    tags=["Board"],
+    tags=["Campaign"],
     parameters=[
         OpenApiParameter("search",              OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, description="Search by title"),
         OpenApiParameter("status",              OpenApiTypes.STR,  OpenApiParameter.QUERY, required=False, enum=["planning", "in_progress", "upcoming"]),

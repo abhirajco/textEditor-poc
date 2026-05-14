@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     CampaignListView, CampaignDetailView, CampaignEventsView, CampaignTasksView,CampaignFilterSearchView,
-    EventListView, EventDetailView, EventTasksView,
+    EventListView, EventDetailView, EventTasksView, EventFilterSearchView,
     TaskListView, TaskDetailView, TaskSubtasksView, TaskUpdateView,
     TransferTaskView, TaskFilterSearchView,
     MyTasksView, TasksByUserView,
@@ -21,6 +21,7 @@ urlpatterns = [
     path("events/", EventListView.as_view(), name="event_list"),
     path("events/<str:event_id>/", EventDetailView.as_view(), name="event_detail"),
     path("events/<str:event_id>/tasks/", EventTasksView.as_view(),  name="event_tasks"),
+    path("events/filter/", EventFilterSearchView.as_view(),  name="event_filter"),
 
     # ── Tasks ─────────────────────────────────────────────────────────────────
     path("tasks/", TaskListView.as_view(), name="task_list"),
