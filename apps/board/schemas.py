@@ -188,9 +188,9 @@ class TaskCreateSchema(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=255)
     description: str = Field(default="")
-    campaign: UUID4
-    event: Optional[UUID4] = None
-    parent_task: Optional[UUID4] = None
+    campaign_id: UUID4
+    event_id: Optional[UUID4] = None
+    parent_task_id: Optional[UUID4] = None
     tags: str = Field(default="", max_length=500)
     priority: PriorityType = Field(default="medium")
     marketing_type: str = Field(default="", max_length=255)
@@ -261,6 +261,27 @@ class DiscussionCreateSchema(BaseModel):
 # Query-param schemas  (use model_validate(dict(request.query_params)))
 # ---------------------------------------------------------------------------
 
+class EventFilterSchema(BaseModel):
+    """
+    Validates GET /events/filter/ query parameters.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    search: Optional[str] = None
+    status: Optional[CampaignStatusType] = None
+    priority: Optional[PriorityType] = None
+    event_type: Optional[str] = None
+    location: Optional[str] = None
+    tags: Optional[str] = None
+    campaign_id: Optional[UUID4] = None
+    created_by: Optional[UUID4] = None
+    start_after: Optional[date] = None
+    start_before: Optional[date] = None
+    end_after: Optional[date] = None
+    end_before: Optional[date] = None
+
+
 class TaskFilterSchema(BaseModel):
     """
     Validates GET /tasks/filter/ query parameters.
@@ -284,6 +305,23 @@ class TaskFilterSchema(BaseModel):
     launch_before: Optional[date] = None
     launch_after: Optional[date] = None
     root_only: bool = False
+
+    assigned_by: UUID | None = None
+
+    due_month: int | None = None
+    due_year: int | None = None
+    due_quarter: int | None = None
+
+    launch_month: int | None = None
+    launch_year: int | None = None
+    launch_quarter: int | None = None
+
+    created_month: int | None = None
+    created_year: int | None = None
+    created_quarter: int | None = None
+
+    created_before: date | None = None
+    created_after: date | None = None
 
     @field_validator("root_only", mode="before")
     @classmethod

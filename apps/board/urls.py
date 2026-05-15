@@ -4,7 +4,7 @@ from .views import (
     EventListView, EventDetailView, EventTasksView, EventFilterSearchView,
     TaskListView, TaskDetailView, TaskSubtasksView, TaskUpdateView,
     TransferTaskView, TaskFilterSearchView,
-    MyTasksView, TasksByUserView,
+    # MyTasksView, TasksByUserView,
     DiscussionView, DiscussionDeleteView, 
 )
 
@@ -26,8 +26,8 @@ urlpatterns = [
     # ── Tasks ─────────────────────────────────────────────────────────────────
     path("tasks/", TaskListView.as_view(), name="task_list"),
     path("tasks/filter/",   TaskFilterSearchView.as_view(),name="task_filter"),
-    path("tasks/mine/", MyTasksView.as_view(), name="my_tasks"),
-    path("tasks/user/<str:user_id>/", TasksByUserView.as_view(),name="tasks_by_user"),
+    # path("tasks/mine/", MyTasksView.as_view(), name="my_tasks"),
+    # path("tasks/user/<str:user_id>/", TasksByUserView.as_view(),name="tasks_by_user"),
     path("tasks/<str:task_id>/", TaskDetailView.as_view(), name="task_detail"),
     path("tasks/<str:task_id>/update/", TaskUpdateView.as_view(), name="task_update"),
     path("tasks/<str:task_id>/transfer/", TransferTaskView.as_view(), name="task_transfer"),

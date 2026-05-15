@@ -85,7 +85,7 @@ class Event(models.Model):
     end_date = models.DateField(null=True, blank=True)
     event_type = models.CharField(max_length=255)
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default="medium")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="to_do", db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="planning", db_index=True)
     location = models.CharField(max_length=255)
     tags = models.CharField(max_length=500, blank=True, default="",
             help_text="Comma-separated tags e.g. design,ux,launch")
