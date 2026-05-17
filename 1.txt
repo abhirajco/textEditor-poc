@@ -1,15 +1,47 @@
-#verify refresh token logic is working
-#see the asgi setting and uvicorn and gunicorn thing...
-
 #admin pswd - 123@#abc
 #uvicorn core.asgi:application --reload  -if you want to run on asgi server
+python -m venv venv
 .\venv\Scripts\activate
+
+
+pip install -r requirements.txt
+pip freeze > requirements.txt
 
 python manage.py makemigrations content
 python manage.py migrate
 
 
+python manage.py shell --for pyhton shell in terminal
 
+python seed_data.py
+
+
+Check which files have been modified- git status
+Add all files to the staging area- git add .
+Commit with a descriptive message- git commit -m ""
+Check your current branch- git branch
+If you aren't on feature/rbac-update, switch to it:- git checkout feature/rbac-update
+git push origin feature/rbac-update
+
+
+celery -A core worker -l info -P solo  (in differnet terminal)
+celery -A core inspect registered - where all the register celery workers are there to be used
+celery -A core inspect active - currently executing task
+celery -A core inspect reserved - in queue waiting to be executed
+
+
+docker exec -it platform_postgres psql -U platform_user -d postgres -c "DROP DATABASE platform_db;"
+docker exec -it platform_postgres psql -U platform_user -d postgres -c "CREATE DATABASE platform_db OWNER platform_user;"
+
+
+
+cd merged_project_v3_copy
+
+pytest                                           # all tests
+pytest tests/test_accounts.py                   # one file
+pytest tests/test_accounts.py::TestLogin        # one class
+pytest tests/test_rbac_and_security.py -v       # with verbose output
+pytest -x                                        # stop at first failure
 
 #content publishing is not working
 #mailing system is not working
@@ -52,7 +84,22 @@ or a simple management command to run EmailOTP.objects.filter(created_at__lt=one
 
 
 
+use queue for mailng (asynchronous)
+comment live fetching(web sockets use)
+if someone adds a name a mail will be gone to that person also
+if redis is empty and 10 call get, so one call be gone to redis and next will be coming from redis
+notifications also
 
+
+#change rbac , admin has all the permissions
+#for now only admins and exes can add comments
+
+
+#indexing in db nad redis
+#send emails to sme which are getting appointed
+#email system when content is begin edited, except who is editing it should go to all concerned person
+#lock should be relased once edited
+#have to change rbac....(it was just for testing purpose, after frontend configuration change the access)
 
 
 

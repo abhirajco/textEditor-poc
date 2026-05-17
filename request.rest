@@ -1,122 +1,1205 @@
-# ### Variables
-# @baseUrl = http://127.0.0.1:8000/api/accounts
-# @email=aryantiwary2003@gmail.com
-# @password = StrongPass123!
-# @fullName = Aryan Tiwary
+### ============================================================
+### Content Management API — Full Test Suite
+### ============================================================
+### Usage: Open in VS Code with REST Client extension
+###        or import into Insomnia / Postman
+###
+### VARIABLES — update these before running
+### ============================================================
 
-# ############################################################
-# # 1. SIGNUP (Triggers OTP Email)
-# ############################################################
-POST {{baseUrl}}/signup/
+@baseUrl = http://localhost:8000/api
+
+@boarUrl = {{baseUrl}}/board
+
+@contentUrl = {{baseUrl}}/content
+
+### Auth tokens — obtain from login endpoints
+# @writerToken     = Bearer <writer_jwt_token>
+# @internalToken   = Bearer <internal_member_jwt_token>
+# @executiveToken  = Bearer <executive_jwt_token>
+# @adminToken      = Bearer <admin_jwt_token>
+
+### IDs — fill in after running create/list calls
+@contentId    = 00000000-0000-0000-0000-000000000000
+@campaignId   = 70d98ae1-25fc-4fe6-b519-ac5469f44eda
+@eventId      = 1
+@versionId    = 00000000-0000-0000-0000-000000000000
+@commentId    = 00000000-0000-0000-0000-000000000000
+@internalId   = 00000000-0000-0000-0000-000000000000
+@executiveId  = 00000000-0000-0000-0000-000000000000
+@adminId      = 00000000-0000-0000-0000-000000000000
+@smeId        = 00000000-0000-0000-0000-000000000000
+
+
+### ============================================================
+### AUTH — Login to get tokens
+### ============================================================
+
+@base     = http://127.0.0.1:8000/api
+@password = Pass123!
+
+
+# ============================================================
+#  1. AUTH FLOW
+# ============================================================
+
+### 1a. Signup (sends OTP to email)
+POST {{base}}/accounts/signup/
 Content-Type: application/json
 
 {
-    "email": "associate2@insight.com",
-    "password": "InSight2026!",
-    "full_name":  "Associate"
+  "email":     "writer3@example.com",
+  "full_name": "writer3",
+  "password":  "Pass123!"
 }
 
-####
-
-# ############################################################
-# # 2. VERIFY OTP (Run this after checking your email)
-# # Replace "123456" with the actual code from your email
-# ############################################################
-POST {{baseUrl}}/verify-otp/
+### 1b. Verify OTP (check terminal for code, completes registration)
+POST {{base}}/accounts/verify-otp/
 Content-Type: application/json
 
 {
-    "email": "associate2@insight.com",
-    "otp": "129802"
+  "email": "writer3@example.com",
+  "otp":   "172883"
 }
 
-# ###
+### 1c. Login as Admin
+# @name adminLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
 
-# ############################################################
-# # 3. LOGIN (Returns JWT Access & Refresh Tokens)
-# ############################################################
-# # @name login
-# POST {{baseUrl}}/login/
+{
+  "email":    "admin@platform.com",
+  "password": "{{password}}"
+}
+
+###
+@adminToken = {{adminLogin.response.body.access}}
+@adminRefresh = {{adminLogin.response.body.refresh}}
+
+### 1d. Login as Executive
+# @name execLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "exec@platform.com",
+  "password": "{{password}}"
+}
+
+###
+@execToken = {{execLogin.response.body.access}}
+
+### 1e. Login as Writer
+# @name writerLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "writer@platform.com",
+  "password": "{{password}}"
+}
+
+###
+@writerToken = {{writerLogin.response.body.access}}
+
+### 1f. Login as Reviewer
+# @name reviewerLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "reviewer@platform.com",
+  "password": "{{password}}"
+}
+
+###
+@reviewerToken = {{reviewerLogin.response.body.access}}
+
+### 1g. Login as SME
+# @name smeLogin
+POST {{base}}/accounts/login/
+Content-Type: application/json
+
+{
+  "email":    "sme@platform.com",
+  "password": "{{password}}"
+}
+
+
+###
+@smeToken = {{smeLogin.response.body.access}}
+
+### 1h. Logout
+POST {{base}}/accounts/logout/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "refresh": "PASTE_REFRESH_TOKEN_HERE"
+}
+
+### 1i. Refresh access token
+POST {{base}}/accounts/token/refresh/
+Content-Type: application/json
+
+{
+  "refresh": "PASTE_REFRESH_TOKEN_HERE"
+}
+
+###
+POST {{base}}/accounts/users/assign/5e8ce970-4198-9892-677c879835/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+ 
+{
+  "group": "executive",
+  "role":  "exec_approver"
+}
+
+
+### ============================================================
+### DROPDOWNS (for form population)
+### ============================================================
+
+### Get active campaigns
+# GET {{contentUrl}}/campaigns/active/
+# Authorization: Bearer  {{writerToken}}
+
+###
+
+### Get events for a campaign
+# GET {{contentUrl}}/events/?campaign_id=fcb7e68f-87df-489e-9744-9b171f739d4b
+# Authorization: Bearer  {{writerToken}}
+
+###
+
+### Get internal members (reviewer+writer list)
+GET {{contentUrl}}/contents/reviewers-list/
+Authorization: Bearer {{writerToken}}
+
+
+### ============================================================
+### STAGE 1 — WRITER CREATES DRAFT
+### ============================================================
+
+### A1. Create new draft content (no content_id → new draft)
+# @name createDraft
+# POST {{contentUrl}}/contents/save/
+# Authorization: Bearer {{writerToken}}
 # Content-Type: application/json
 
 # {
-#     "email": "{{email}}",
-#     "password": "SecurePassword123"
+#   "campaign_id": "fcb7e68f-87df-489e-9744-9b171f739d4b",
+#   "title": "My First Blog Post",
+#   "body": "This is the body of the content piece.",
+#   "submit": false
 # }
 
 # ###
 
-# ############################################################
-# # 4. LOGOUT (Requires Access Token in Header)
-# ############################################################
-# @refreshToken = {{login.response.body.refresh}}
-# @accessToken = {{login.response.body.access}}
-
-# POST {{baseUrl}}/logout/
-# Authorization: Bearer {{accessToken}}
+# ### A2. Save/update existing draft (lock required first → see Lock section)
+# POST {{contentUrl}}/contents/save/
+# Authorization: {{writerToken}}
 # Content-Type: application/json
 
 # {
-#     "refresh": "{{refreshToken}}"
+#   "content_id": "{{contentId}}",
+#   "title": "My First Blog Post — Updated",
+#   "body": "Updated body with more details.",
+#   "submit": false
 # }
 
+###
 
-### Variables
-@baseUrl = http://127.0.0.1:8000/api/accounts
-@adminEmail = admin@insight.com
-@password = InSight2026!
-
-### 1. LOGIN AS ADMIN
-# This will give you the access token needed for other requests
-# @name login
-POST {{baseUrl}}/login/
+### A3. Submit for internal review (status → in_review)
+###     notify_user_ids = internal member(s) to notify
+POST {{contentUrl}}/contents/save/
+Authorization: {{writerToken}}
 Content-Type: application/json
 
 {
-    "email": "{{adminEmail}}",
-    "password": "{{password}}"
+  "content_id": "{{contentId}}",
+  "title": "My First Blog Post — Final",
+  "body": "This is the final version ready for review.",
+  "submit": true,
+  "notify_user_ids": ["{{internalId}}"]
 }
 
-### Capture the token from the response above
-@accessToken = {{login.response.body.access}}
-@refreshToken = {{login.response.body.refresh}}
+
+### ============================================================
+### CONTENT LOCKING
+### ============================================================
+
+### Acquire lock (must hold lock to edit)
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/lock/
+Authorization: Bearer {{adminToken}}
+
+###
+
+### Release lock
+DELETE {{contentUrl}}/contents/{{contentId}}/lock/
+Authorization: {{writerToken}}
 
 
-### 2. VIEW ALL USERS (Admin Only)
-# Uses the HasRBACPermission / IsAdminUserRole
-GET {{baseUrl}}/view-all/
-Authorization: Bearer {{accessToken}}
+### ============================================================
+### STAGE 2 — INTERNAL MEMBER APPROVES
+### ============================================================
 
-
-### 3. VIEW UNASSIGNED PEOPLE
-# This shows everyone with role='user'
-GET {{baseUrl}}/unassigned/
-Authorization: Bearer {{accessToken}}
-
-
-### 4. ASSIGN A NEW ROLE
-# Replace "2" with an actual User ID from the View All list
-# Try changing a 'user' to a 'writer'
-POST {{baseUrl}}/assign-role/8/
-Authorization: Bearer {{accessToken}}
+### B1. Internal member approves
+###     → sets internal_approval=True
+###     → automatically notifies ALL executives and ALL admins
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{internalToken}}
 Content-Type: application/json
 
 {
-    "role": "associate"
+  "action": "approve"
 }
 
+###
 
-### 5. REFRESH TOKEN
-# Use this when your access token expires (after 30 mins)
-POST {{baseUrl}}/token/refresh/
+### B2. Internal member rejects (locks content permanently)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{internalToken}}
 Content-Type: application/json
 
 {
-    "refresh": "{{refreshToken}}"
+  "action": "reject",
+  "reason": "Content does not meet our quality standards. Please rewrite the introduction."
+}
+
+
+### ============================================================
+### STAGE 3 — EXECUTIVE (stakeholder_approval) — parallel with admin
+### ============================================================
+
+### C1. Executive approves — stakeholder sign-off
+###     (only allowed after internal_approval=True)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{executiveToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###
+
+### C2. Executive rejects (locks permanently)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{executiveToken}}
+Content-Type: application/json
+
+{
+  "action": "reject",
+  "reason": "The messaging does not align with our Q3 campaign strategy."
+}
+
+
+### ============================================================
+### STAGE 3 — ADMIN (marketing_approval) — parallel with executive
+### ============================================================
+
+### D1. Admin approves — marketing sign-off
+###     (only allowed after internal_approval=True)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###
+
+### D2. Admin rejects (locks permanently)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "reject",
+  "reason": "SEO requirements not met. Missing primary keyword in title."
+}
+
+
+### ============================================================
+### STAGE 4 — PUBLISH
+###   Option A: Auto-publish fires 24h after all_approved_at is set (Celery)
+###   Option B: Admin publishes immediately once all 3 flags are True
+### ============================================================
+
+### E1. Admin manually publishes (once all 3 approvals are done)
+POST {{contentUrl}}/contents/{{contentId}}/approve/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "publish"
+}
+
+
+### ============================================================
+### COMMENTS (any approver — reverts to draft while in_review)
+### ============================================================
+
+### F1. Add a comment (reverts content to draft, resets all approval flags)
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/comment/
+Authorization:Bearer {{reviewerToken}}
+Content-Type: application/json
+
+{
+  "comment_text": "Please revise the third paragraph — the tone is too informal. @[John Writer]({{internalId}})"
+}
+
+###
+
+### F2. Get comment history for a content piece
+GET {{contentUrl}}/contents/{{contentId}}/comments/history/
+Authorization: {{adminToken}}
+
+###
+
+### F3. Resolve a comment
+PATCH {{contentUrl}}/comments/resolve/{{commentId}}/
+Authorization: {{adminToken}}
+
+###
+
+### F4. Edit your own comment
+PATCH {{contentUrl}}/comments/edit/{{commentId}}/
+Authorization: {{internalToken}}
+Content-Type: application/json
+
+{
+  "comment_text": "Revised feedback: please update the conclusion as well."
+}
+
+###
+
+### F5. Delete your own comment
+DELETE {{contentUrl}}/comments/edit/{{commentId}}/
+Authorization: {{internalToken}}
+
+
+### ============================================================
+### CONTENT DETAIL & LIST VIEWS
+### ============================================================
+
+### G1. Get content detail (includes approval flags, locked_permanently, can_publish_now)
+GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/
+Authorization:Bearer {{adminToken}}
+
+#90bd801a-c75e-413f-b33a-6219898d6ddf
+#231985d6-eb45-42d1-b2f7-d1ed4d4bc30e
+###
+
+### G2. Get all active (non-published) content
+# GET {{contentUrl}}/contents/active/
+# Authorization:Bearer {{adminToken}}
+
+# ###
+
+# ### G3. Get all published content
+# GET {{contentUrl}}/contents/published/
+# Authorization: Bearer {{adminToken}}
+
+
+### ============================================================
+### STAGE-BASED LIST VIEWS (new — 4 stages)
+### ============================================================
+
+# ### H1. Get all DRAFT content
+# GET {{contentUrl}}/contents/stage/draft/
+# Authorization:Bearer {{adminToken}}
+
+###
+
+### H2. Get all IN_REVIEW content
+# GET {{contentUrl}}/contents/stage/in_review/
+# Authorization:Bearer {{adminToken}}
+
+# ###
+
+# ### H3. Get all REJECTED content
+# GET {{contentUrl}}/contents/stage/rejected/
+# Authorization:Bearer {{adminToken}}
+
+# ###
+
+# ### H4. Get all PUBLISHED content
+# GET {{contentUrl}}/contents/stage/published/
+# Authorization:Bearer {{adminToken}}
+
+###
+
+### H5. Get draft content for a specific campaign
+GET {{contentUrl}}/contents/stage/draft/?campaign_id=fcb7e68f-87df-489e-9744-9b171f739d4b
+Authorization: Bearer {{adminToken}}
+
+###
+
+### H6. Get in_review content by a specific author
+GET {{contentUrl}}/contents/stage/in_review/?author_id={{internalId}}
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### STATS — COUNT PER STAGE
+### ============================================================
+
+### I1. Global stats across all content
+GET {{contentUrl}}/contents/stats/
+Authorization:Bearer {{adminToken}}
+
+###
+
+### I2. Stats for a specific campaign
+GET {{contentUrl}}/contents/stats/?campaign_id={{campaignId}}
+Authorization: {{adminToken}}
+
+###
+
+### I3. Stats for a specific author
+GET {{contentUrl}}/contents/stats/?author_id=b08cf5df-c9be-4f1d-b12a-60ae5da0afd6
+Authorization: Bearer {{adminToken}}
+
+###
+
+### I4. Stats for campaign + author
+GET {{contentUrl}}/contents/stats/?campaign_id={{campaignId}}&author_id={{internalId}}
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### FILTER / ANALYTICS
+### ============================================================
+
+### J1. Filter by content type
+GET {{contentUrl}}/contents/filter/?content_type=blog
+Authorization:Bearer {{adminToken}}
+
+###
+GET {{contentUrl}}/contents/filter/
+Authorization:Bearer {{adminToken}}
+###
+
+
+GET {{contentUrl}}/contents/filter/?status=draft
+Authorization:Bearer {{adminToken}}
+
+###
+
+### J2. Filter by status
+GET {{contentUrl}}/contents/filter/?status=in_review
+Authorization: {{adminToken}}
+
+###
+
+### J3. Filter by status=rejected (locked content)
+GET {{contentUrl}}/contents/filter/?status=rejected
+Authorization: {{adminToken}}
+
+###
+
+### J4. Filter by tags
+GET {{contentUrl}}/contents/filter/?tags=seo,product
+Authorization: {{adminToken}}
+
+###
+
+### J5. Filter by year
+GET {{contentUrl}}/contents/filter/?year=2026
+Authorization:Bearer {{adminToken}}
+
+###
+
+### J6. Filter by year + quarter with period breakdown
+GET {{contentUrl}}/contents/filter/?year=2025&quarter=2&group_by=period
+Authorization:Bearer {{adminToken}}
+
+###
+
+### J7. Filter by year + month
+GET {{contentUrl}}/contents/filter/?year=2025&month=7
+Authorization: {{adminToken}}
+
+###
+
+### J8. Combined filter
+GET {{contentUrl}}/contents/filter/?content_type=blog&status=published&campaign_id={{campaignId}}&year=2025&group_by=period
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### VERSIONS
+### ============================================================
+
+### K1. Get version history
+GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/history/
+Authorization:Bearer {{adminToken}}
+
+###
+
+### K2. Get a specific version
+GET {{contentUrl}}/contents/{{contentId}}/versions/{{versionId}}/
+Authorization: {{adminToken}}
+
+###
+
+### K3. Get latest version
+GET {{contentUrl}}/contents/{{contentId}}/latest-version/
+Authorization: {{adminToken}}
+
+
+### ============================================================
+### EXECUTIVE INITIATION FLOW
+### ============================================================
+
+### L1. Executive initiates a content piece
+POST {{contentUrl}}/contents/initiate/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "Q3 Product Launch Blog",
+  "brief": "A blog post announcing our Q3 product launch with key features and benefits.",
+  "content_type": "blog",
+  "campaign_id": "{{campaignId}}",
+  "tags": "product,launch,q3",
+  "sme_id": "38a3b6a2-6dc4-4b3a-aaab-0a89ef2fc9fe"
+}
+
+
+###
+GET {{contentUrl}}/contents/form/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+###
+POST {{contentUrl}}/contents/startFromForm/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+"title": "AI Marketing Strategy",
+"brief": "Create a detailed blog on how AI is transforming digital marketing in 2026.",
+"content_type": "blog",
+"campaign_id": "71da0acf-a49a-4d92-86b7-9afe406ee0f0",
+"tags": "ai,marketing,2026",
+"created_by": "acaa61fa-c2c3-4a11-8b05-814bfa1247ab",
+"form_id": "dabd382f-5305-4363-a97c-4a87d842ff16",
+"sme_id": "3e980e24-c271-4842-9859-ae29018ed635"
+}
+
+###
+
+POST {{contentUrl}}/contents/new/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+"title": "AI Marketing Strategy from new content 2",
+"brief": "Create a detailed blog on how AI is transforming digital marketing in 2026.",
+"content_type": "blog",
+"campaign_id": "71da0acf-a49a-4d92-86b7-9afe406ee0f0",
+//"event_id": "REPLACE_WITH_EVENT_UUID",
+"tags": "ai,marketing,2026",
+"executive_id": "acaa61fa-c2c3-4a11-8b05-814bfa1247ab"
+}
+
+
+# "form_id": "6850d311-4ff0-4e1d-9ae4-283751a39198",
+###
+GET {{contentUrl}}/contents/form/?sme_id=38a3b6a2-6dc4-4b3a-aaab-0a89ef2fc9fe
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+###
+GET {{contentUrl}}/contents/form/?campaign_id=70d98ae1-25fc-4fe6-b519-ac5469f44eda
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+
+###
+GET {{contentUrl}}/contents/form/?created_by=bede01ce-af42-48b9-a548-0d92f43d0431
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+### ============================================================
+### SME ASSIGNMENT
+### ============================================================
+
+### M1. Assign SME to content
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/assign-sme/
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "sme_id": "38a3b6a2-6dc4-4b3a-aaab-0a89ef2fc9fe",
+  "executive_id": "a407660f-324d-4a3b-93cf-68880d6d2f80"
+}
+
+###
+# 6850d311-4ff0-4e1d-9ae4-283751a39198
+
+GET {{contentUrl}}/contents/particularForm/6850d311-4ff0-4e1d-9ae4-283751a39198
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+
+
+
+
+
+## ===================================
+SAVING AND SUBMITTING Content-Length
+### ===============================
+
+
+POST {{contentUrl}}/contents/save/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "content_id": "90bd801a-c75e-413f-b33a-6219898d6ddf",
+  "title": "save 2",
+  "body": "Test body 2"
+}
+
+
+###
+
+
+POST {{contentUrl}}/contents/submit/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "content_id": "90bd801a-c75e-413f-b33a-6219898d6ddf"
 }
 
 
 
+###
+### Get SME + Executive assignments for a content
+GET {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/assignments/
+Authorization: Bearer {{adminToken}}
 
-#id - 1,7,4 - writer
-#id - 5,2 - approver
+
+###
+
+
+GET {{contentUrl}}/contents/231985d6-eb45-42d1-b2f7-d1ed4d4bc30e/history2/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+###############################################
+### 1. INTERNAL APPROVAL (Step 1)
+###############################################
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/approve/
+Authorization: Bearer {{reviewerToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 2. EXECUTIVE APPROVAL (Step 2 - stakeholder)
+###############################################
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/approve/
+Authorization: Bearer {{execToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 3. ADMIN APPROVAL (Step 2 - marketing)
+###############################################
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+
+###
+POST {{contentUrl}}/contents/231985d6-eb45-42d1-b2f7-d1ed4d4bc30e/reject/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "reject",
+  "reason": "didnt like it"
+}
+###############################################
+### 4. REJECT CONTENT (any role with permission)
+###############################################
+# POST {{baseUrl}}/contents/{{contentId}}/approve/
+# Authorization: Bearer {{adminToken}}
+# Content-Type: application/json
+
+# {
+#   "action": "reject",
+#   "reason": "Content quality is not sufficient."
+# }
+
+###############################################
+### 5. REJECT WITHOUT REASON (ERROR CASE)
+###############################################
+# POST {{baseUrl}}/contents/{{contentId}}/approve/
+# Authorization: Bearer {{adminToken}}
+# Content-Type: application/json
+
+# {
+#   "action": "reject"
+# }
+
+###############################################
+### 6. PUBLISH CONTENT (ADMIN ONLY)
+###############################################
+POST {{contentUrl}}/contents/90bd801a-c75e-413f-b33a-6219898d6ddf/publish/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "publish"
+}
+
+###############################################
+### 7. PUBLISH WITHOUT ALL APPROVALS (ERROR)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "publish"
+}
+
+###############################################
+### 8. INVALID ACTION (ERROR)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "invalid_action"
+}
+
+###############################################
+### 9. APPROVE WHEN NOT IN REVIEW (ERROR)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{internalToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 10. EXECUTIVE APPROVES AGAIN (DUPLICATE)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{executiveToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 11. ADMIN APPROVES AGAIN (DUPLICATE)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 12. INTERNAL APPROVES AGAIN (DUPLICATE)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Authorization: Bearer {{internalToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 13. UNAUTHORIZED USER (NO TOKEN)
+###############################################
+POST {{baseUrl}}/contents/{{contentId}}/approve/
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+
+###############################################
+### 14. INVALID CONTENT ID
+###############################################
+POST {{baseUrl}}/contents/INVALID_ID/approve/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "action": "approve"
+}
+### ============================================================
+### NOTIFY CANDIDATES
+### ============================================================
+
+### N1. Manually notify users about content
+POST {{contentUrl}}/contents/{{contentId}}/notify-candidates/
+Authorization: {{adminToken}}
+Content-Type: application/json
+
+{
+  "notify_user_ids": ["{{internalId}}", "{{executiveId}}"]
+}
+
+
+###
+GET {{contentUrl}}/contents/sme
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/exe
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/writer
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/reviewer
+Authorization:Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+
+
+
+
+
+# ============================================================
+# KANBAN BOARD — NEW ENDPOINTS (tags, priority, marketing_type, due_date)
+# ============================================================
+
+###
+GET {{boarUrl}}/campaigns/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+PATCH {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "AMS"
+}
+
+###
+GET {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/events
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+
+
+
+###
+PATCH {{boarUrl}}/campaigns/70d98ae1-25fc-4fe6-b519-ac5469f44eda/events
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "AMS"
+}
+
+# "campaign_id": "70d98ae1-25fc-4fe6-b519-ac5469f44eda",
+
+###
+GET {{contentUrl}}/contents/sme
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/exe
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/writer
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+GET {{contentUrl}}/contents/reviewer
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+###
+
+### ✅ Start Content From Form API
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Create task with all new fields
+POST {{base}}/board/tasks/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "title":          "Design social media campaign",
+  "description":    "Create assets for Q2 launch campaign across all platforms.",
+  "assigned_to":    3,
+  "tags":           "design,social,q2,launch",
+  "priority":       "high",
+  "marketing_type": "Social Media",
+  "due_date":       "2026-04-15"
+}
+
+### Update task metadata (tags, priority, marketing_type, due_date)
+# Only task creator, last transferrer, or admin can do this
+PATCH {{base}}/board/tasks/1/update/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "tags":           "design,social,q2,revised",
+  "priority":       "medium",
+  "marketing_type": "Email Campaign",
+  "due_date":       "2026-04-20"
+}
+
+### Update just the title
+PATCH {{base}}/board/tasks/1/update/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "title": "Updated Campaign Design Task"
+}
+
+### Update status only (existing endpoint — now supports blocked + approved)
+PATCH {{base}}/board/tasks/1/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "status": "blocked"
+}
+
+
+###
+PATCH {{base}}/board/tasks/1/
+Authorization: Bearer {{writerToken}}
+Content-Type: application/json
+
+{
+  "status": "approved"
+}
+
+# ============================================================
+# BOARD — FILTER & SEARCH
+# ============================================================
+###
+GET {{base}}/board/tasks/
+Authorization: Bearer {{adminToken}}
+### Search by title keyword
+GET {{base}}/board/tasks/filter/?search=campaign
+Authorization: Bearer {{writerToken}}
+
+### Filter by status
+GET {{base}}/board/tasks/filter/?status=blocked
+Authorization: Bearer {{writerToken}}
+
+### Filter by priority
+GET {{base}}/board/tasks/filter/?priority=high
+Authorization: Bearer {{writerToken}}
+
+### Filter by marketing type
+GET {{base}}/board/tasks/filter/?marketing_type=social
+Authorization: Bearer {{writerToken}}
+
+### Filter by assigned user
+GET {{base}}/board/tasks/filter/?assigned_to=3
+Authorization: Bearer {{writerToken}}
+
+### Filter by exact due date
+GET {{base}}/board/tasks/filter/?due_date=2026-04-15
+Authorization: Bearer {{writerToken}}
+
+### Filter tasks due before a date
+GET {{base}}/board/tasks/filter/?due_before=2026-05-01
+Authorization: Bearer {{writerToken}}
+
+### Filter tasks due after a date
+GET {{base}}/board/tasks/filter/?due_after=2026-04-01
+Authorization: Bearer {{writerToken}}
+
+### Filter by tag
+GET {{base}}/board/tasks/filter/?tags=design
+Authorization: Bearer {{writerToken}}
+
+### Combine multiple filters (high priority + not yet done + due soon)
+GET {{base}}/board/tasks/filter/?priority=high&status=in_progress&due_before=2026-05-01
+Authorization: Bearer {{writerToken}}
+
+### Search + filter combo
+GET {{base}}/board/tasks/filter/?search=campaign&priority=high&assigned_to=3
+Authorization: Bearer {{writerToken}}
+
+### Full filter — every param at once
+GET {{base}}/board/tasks/filter/?search=design&status=in_progress&priority=high&marketing_type=social&assigned_to=3&due_before=2026-05-01&tags=q2
+Authorization: Bearer {{writerToken}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 1. Search + Status + Priority + Location + Start Date + Hierarchy
+GET http://localhost:8000/api/campaigns/?search=launch&status=planning&priority=high&location=mumbai&start_after=2026-01-01&max_hierarchy_level=2
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 2. Campaign Type + Status + Priority + End Date Range + Location + Hierarchy
+GET http://localhost:8000/api/campaigns/?campaign_type=marketing&status=in_progress&priority=medium&end_after=2026-03-01&end_before=2026-12-31&location=delhi&max_hierarchy_level=3
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 3. Search + Campaign Type + Created By + Start Date Range + Priority + Status
+GET http://localhost:8000/api/campaigns/?search=festival&campaign_type=event&created_by=USER_UUID&start_after=2026-04-01&start_before=2026-06-30&priority=low&status=upcoming
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 4. Location + Created By + Status + Priority + End Date + Hierarchy
+GET http://localhost:8000/api/campaigns/?location=bangalore&created_by=USER_UUID&status=planning&priority=high&end_before=2026-10-01&max_hierarchy_level=1
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 5. Search + Campaign Type + Location + Start + End Range + Priority
+GET http://localhost:8000/api/campaigns/?search=sale&campaign_type=retail&location=pune&start_after=2026-02-01&end_before=2026-08-31&priority=medium
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+### 6. Status + Priority + Created By + Full Date Window + Hierarchy
+GET http://localhost:8000/api/campaigns/?status=in_progress&priority=high&created_by=USER_UUID&start_after=2026-01-01&end_before=2026-12-31&max_hierarchy_level=2
+Authorization: Bearer YOUR_ACCESS_TOKEN
+
+
+
+
+### ============================================================
+### FULL HAPPY-PATH FLOW (copy & run in order)
+### ============================================================
+
+### STEP 1 — Writer creates draft
+# POST {{contentUrl}}/contents/save/  (no content_id, submit=false)
+
+### STEP 2 — Writer acquires lock
+# POST {{contentUrl}}/contents/{{contentId}}/lock/
+
+### STEP 3 — Writer submits for review (status → in_review)
+# POST {{contentUrl}}/contents/save/  (submit=true, notify_user_ids=[internal_member_id])
+
+### STEP 4 — Internal member approves (→ notifies all execs + admins automatically)
+# POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "approve"}  (as internal)
+
+### STEP 5a — Executive approves (parallel)
+# POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "approve"}  (as executive)
+
+### STEP 5b — Admin approves (parallel) — once both done, all_approved_at is stamped
+# POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "approve"}  (as admin)
+
+### STEP 6 — Either:
+#   a) Wait 24h for auto-publish (Celery fires auto_publish_content_task)
+#   b) Admin clicks publish now
+#      POST {{contentUrl}}/contents/{{contentId}}/approve/  {"action": "publish"}  (as admin)
+
+
+### ============================================================
+### REJECTION FLOW
+### ============================================================
+
+### STEP 1-3 same as happy path above
+
+### STEP 4 — Anyone rejects (content locked permanently)
+# POST {{contentUrl}}/contents/{{contentId}}/approve/
+# {"action": "reject", "reason": "Does not meet brand guidelines."}
+
+### STEP 5 — Verify content is locked
+# GET {{contentUrl}}/contents/{{contentId}}/
+# → locked_permanently: true, status: "rejected"
+
+### STEP 6 — Attempting to lock or edit returns 423
+# POST {{contentUrl}}/contents/{{contentId}}/lock/
+# → 423 "Content is permanently locked due to rejection"
+
+
+### ============================================================
+### COMMENT REVERTS-TO-DRAFT FLOW
+### ============================================================
+
+### STEP 1-4 same as happy path (up to internal approval)
+
+### STEP 5 — Admin/Executive adds comment while in_review
+# POST {{contentUrl}}/contents/{{contentId}}/comment/
+# {"comment_text": "Please revise the title."}
+# → new_status: "draft", all approval flags reset
+
+### STEP 6 — Writer must resubmit (go back to STEP 2)
